@@ -1,5 +1,5 @@
 // App-Kern: Navigation, Speicherung (localStorage), Spieler-Setup, Rückgängig, Gewinneranzeige.
-import { GAMES, GAME_LIST } from './games/index.js';
+import { GAMES, GAME_LIST } from './index.js';
 import { esc, uid, btn } from './util.js';
 
 const KEY = { sessions: 'zb.sessions', players: 'zb.players', settings: 'zb.settings' };

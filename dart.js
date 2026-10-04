@@ -1,5 +1,5 @@
 // Dart: X01 (301/501/701) und Cricket, mit Legs, Bust-Erkennung und Checkout-Vorschlägen.
-import { esc, btn, fill } from '../util.js';
+import { esc, btn, fill } from './util.js';
 
 const CRICKET = [20, 19, 18, 17, 16, 15, 25];
 const IMPOSSIBLE = new Set([163, 166, 169, 172, 173, 175, 176, 178, 179]);

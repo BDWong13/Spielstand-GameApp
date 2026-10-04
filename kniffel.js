@@ -1,5 +1,5 @@
 // Kniffel: klassischer Block mit Bonus ab 63 Punkten oben.
-import { esc, btn, sum } from '../util.js';
+import { esc, btn, sum } from './util.js';
 
 const UPPER = [1, 2, 3, 4, 5, 6].map(v => ({ k: 'u' + v, label: ['Einser', 'Zweier', 'Dreier', 'Vierer', 'Fünfer', 'Sechser'][v - 1], face: v }));
 const LOWER = [

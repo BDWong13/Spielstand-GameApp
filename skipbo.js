@@ -1,5 +1,5 @@
 // Skip-Bo: Rundensieger erhält 25 + 5 je Karte, die den Gegnern im Spielstapel bleibt.
-import { esc, btn, stepper, fill, sum, scoreTable, leaders, simpleStandings } from '../util.js';
+import { esc, btn, stepper, fill, sum, scoreTable, leaders, simpleStandings } from './util.js';
 
 const totals = s => s.players.map((_, p) => sum(s.data.rounds.map(r => r.pts[p])));
 const blankEntry = n => ({ winner: null, cards: fill(n, 0) });

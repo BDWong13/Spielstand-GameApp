@@ -1,12 +1,12 @@
 // Service Worker: legt alle Dateien beim ersten Besuch im Cache ab, danach läuft die App ohne Internet.
 // Bei Änderungen an der App VERSION erhöhen, damit Geräte die neue Fassung laden.
-const VERSION = 'spielstand-v3';
+const VERSION = 'spielstand-v4';
 const ASSETS = [
-  './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/app.js', 'js/util.js',
-  'js/games/index.js', 'js/games/common.js', 'js/games/dart.js', 'js/games/wizard.js', 'js/games/phase10.js',
-  'js/games/kniffel.js', 'js/games/skipbo.js', 'js/games/romme.js', 'js/games/custom.js',
-  'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
+  './', 'index.html', 'manifest.webmanifest', 'style.css',
+  'app.js', 'util.js',
+  'index.js', 'common.js', 'dart.js', 'wizard.js', 'phase10.js',
+  'kniffel.js', 'skipbo.js', 'romme.js', 'custom.js',
+  'icon-180.png', 'icon-192.png', 'icon-512.png',
 ];
 
 self.addEventListener('install', e => {

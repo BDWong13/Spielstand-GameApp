@@ -1,5 +1,5 @@
 // Rommé: Strafpunkte für Handkarten, Hand-Rommé zählt doppelt. Wenigste Punkte gewinnen.
-import { esc, btn, fill, sum, numInput, parseNum, scoreTable, leaders, simpleStandings } from '../util.js';
+import { esc, btn, fill, sum, numInput, parseNum, scoreTable, leaders, simpleStandings } from './util.js';
 import { CARDSETS, calcButton, calcOverlay, calcActions } from './common.js';
 
 const totals = s => s.players.map((_, p) => sum(s.data.rounds.map(r => r.pts[p])));

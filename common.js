@@ -1,5 +1,5 @@
 // Gemeinsame Bausteine: Kartenrechner (Strafpunkte aus Handkarten zusammenzählen).
-import { esc, btn, sum } from '../util.js';
+import { esc, btn, sum } from './util.js';
 
 export const CARDSETS = {
   phase10: [

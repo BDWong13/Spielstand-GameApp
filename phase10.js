@@ -1,5 +1,5 @@
 // Phase 10 (Kartenspiel): Phasen abhaken, Strafpunkte für Restkarten.
-import { esc, btn, fill, sum, numInput, parseNum, scoreTable } from '../util.js';
+import { esc, btn, fill, sum, numInput, parseNum, scoreTable } from './util.js';
 import { CARDSETS, calcButton, calcOverlay, calcActions } from './common.js';
 
 export const PHASES = [

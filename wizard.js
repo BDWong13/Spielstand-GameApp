@@ -1,5 +1,5 @@
 // Wizard: Stiche ansagen, Stiche zählen. 20 + 10 je Stich bei Treffer, −10 je Stich Abweichung.
-import { esc, btn, stepper, fill, sum, signed, scoreTable, leaders, simpleStandings } from '../util.js';
+import { esc, btn, stepper, fill, sum, signed, scoreTable, leaders, simpleStandings } from './util.js';
 
 const totalRounds = s => (s.options.rounds === 'custom' ? +s.options.customRounds : 60 / s.players.length);
 const score = (bid, got) => (bid === got ? 20 + 10 * got : -10 * Math.abs(bid - got));

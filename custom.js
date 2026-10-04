@@ -1,5 +1,5 @@
 // Freier Zähler für beliebige Spiele.
-import { esc, btn, fill, sum, numInput, parseNum, scoreTable, leaders, simpleStandings } from '../util.js';
+import { esc, btn, fill, sum, numInput, parseNum, scoreTable, leaders, simpleStandings } from './util.js';
 
 const totals = s => s.players.map((_, p) => sum(s.data.rounds.map(r => r[p])));
 const lowWins = s => s.options.win === 'low';
