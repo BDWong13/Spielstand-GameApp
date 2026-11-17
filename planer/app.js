@@ -314,6 +314,7 @@ function icsToEvents(raw, source) {
     const span = diff(st.date, endDate);
     const title = unescIcs(r.SUMMARY?.value) || '(ohne Titel)';
     const u = r.UID?.value || '';
+    if (u.endsWith('@planer') || isPlanerEntry(title)) continue;
     const ex = (r.EXDATE || []).map(x => icsDate({ value: x })?.date);
     const dates = r.RRULE && !r.RID ? expandRrule(r.RRULE.value, st.date, from, to, ex) : [st.date];
     for (const d of dates) {
@@ -354,6 +355,7 @@ function parseShortcut(text) {
     else if (endTime === '00:00' && endDate > st.date) { endDate = addDays(endDate, -1); endTime = '23:59'; }
     if (endDate < st.date) endDate = st.date;
     const title = parts[2] || '(ohne Titel)';
+    if (isPlanerEntry(title, parts[3])) continue;
     out.push({
       id: uid(), title, date: st.date, endDate: endDate !== st.date ? endDate : null,
       start: allDay ? '' : st.time, end: allDay ? '' : (endTime || fromMin(Math.min(1439, toMin(st.time) + 60))), allDay,
@@ -362,6 +364,8 @@ function parseShortcut(text) {
   }
   return out;
 }
+// Vom Planer exportierte Einträge (⚑ Deadline, ▶ Zeitblock, Kalender „Planer“) nicht zurückimportieren.
+const isPlanerEntry = (title, cal = '') => /^[⚑▶]/.test(title) || /^planer$/i.test(String(cal).trim());
 const srcLabel = s => s === 'iphone' ? 'iPhone-Kalender' : s.startsWith('ics:') ? s.slice(4) : 'Planer';
 function importEvents(list, source) {
   snap();
@@ -1058,7 +1062,7 @@ function render() {
   const sheet = !s ? '' : {
     edit: () => sheetEdit(s.draft), plan: () => sheetPlan(task(s.id)), project: () => sheetProject(s.draft),
     template: () => sheetTemplate(s.draft), apply: () => sheetApply(s.draft), confirm: () => sheetConfirm(s),
-    event: () => sheetEvent(s.draft), paste: () => sheetPaste(s.draft), choose: () => sheetChoose(s.day),
+    event: () => sheetEvent(s.draft), export: () => sheetExport(), paste: () => sheetPaste(s.draft), choose: () => sheetChoose(s.day),
   }[s.type]();
   const t0 = today();
   const badge = {
@@ -1158,15 +1162,17 @@ function saveDraft() {
   return { d, isNew: i < 0 };
 }
 
-function exportIcs() {
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+// Export-Einträge mit Signatur. Damit lässt sich erkennen, was seit dem letzten Export neu oder geändert ist.
+function icsItems() {
   const e = x => String(x).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\r?\n/g, '\\n');
   const dt = (date, time) => `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
-  const ev = (id, summary, when, desc, extra = '') =>
-    `BEGIN:VEVENT\r\nUID:${id}@planer\r\nDTSTAMP:${stamp}\r\n${when}\r\nSUMMARY:${e(summary)}\r\n${desc ? `DESCRIPTION:${e(desc)}\r\n` : ''}${extra}END:VEVENT`;
+  const ev = (id, summary, when, desc, extra = '') => ({
+    key: id,
+    text: `BEGIN:VEVENT\r\nUID:${id}@planer\r\nDTSTAMP:@@STAMP@@\r\n${when}\r\nSUMMARY:${e(summary)}\r\n${desc ? `DESCRIPTION:${e(desc)}\r\n` : ''}${extra}END:VEVENT`,
+  });
   const allDay = (from, to) => `DTSTART;VALUE=DATE:${from.replace(/-/g, '')}\r\nDTEND;VALUE=DATE:${addDays(to, 1).replace(/-/g, '')}`;
   const out = [];
-  open().filter(t => t.due).forEach(t => {
+  open().filter(t => t.due && t.due >= addDays(today(), -1)).forEach(t => {
     const p = proj(t.project);
     const desc = [p && `Projekt: ${p.name}`, t.status === 'waiting' && `Warten auf: ${t.waitingFor}`, t.notes].filter(Boolean).join('\n');
     out.push(ev(`${t.id}-due`, `⚑ ${t.title}`, t.dueTime ? `DTSTART:${dt(t.due, t.dueTime)}\r\nDURATION:PT30M` : allDay(t.due, t.due), desc, 'TRANSP:TRANSPARENT\r\n'));
@@ -1179,9 +1185,37 @@ function exportIcs() {
     const when = x.allDay ? allDay(x.date, x.endDate || x.date) : `DTSTART:${dt(x.date, x.start)}\r\nDTEND:${dt(x.endDate || x.date, x.end || fromMin(Math.min(1439, toMin(x.start) + 60)))}`;
     out.push(ev(x.id, x.title, when, x.notes, `${x.location ? `LOCATION:${e(x.location)}\r\n` : ''}${x.repeat ? `RRULE:${RR[x.repeat]}\r\n` : ''}`));
   });
-  if (!out.length) { toast('Nichts zum Exportieren'); return; }
-  download(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Planer//DE\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Planer\r\n${out.join('\r\n')}\r\nEND:VCALENDAR\r\n`, `planer-${today()}.ics`, 'text/calendar');
-  toast(`${out.length} Einträge exportiert – Datei im Kalender öffnen`);
+  const done = db.settings.exported || {};
+  out.forEach(it => { it.sig = it.text; it.state = !done[it.key] ? 'new' : done[it.key] !== it.sig ? 'changed' : 'same'; });
+  return out;
+}
+function exportIcs(mode) {
+  const items = icsItems().filter(it => mode === 'all' || it.state !== 'same');
+  if (!items.length) { toast(mode === 'all' ? 'Nichts zum Exportieren' : 'Nichts Neues seit dem letzten Export 👍'); return; }
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  download(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Planer//DE\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Planer\r\n${items.map(it => it.text.replace('@@STAMP@@', stamp)).join('\r\n')}\r\nEND:VCALENDAR\r\n`, `planer-${today()}.ics`, 'text/calendar');
+  db.settings.exported = { ...(db.settings.exported || {}) };
+  items.forEach(it => { db.settings.exported[it.key] = it.sig; });
+  save();
+  const changed = items.filter(it => it.state === 'changed').length;
+  toast(`${items.length} Einträge exportiert${changed ? ` – ${changed} geänderte: alte Version im Kalender löschen` : ''}`);
+}
+
+function sheetExport() {
+  const items = icsItems();
+  const n = items.filter(i => i.state === 'new'), c = items.filter(i => i.state === 'changed');
+  const title = it => esc(it.text.match(/SUMMARY:(.*)/)[1].replace(/\\([,;\\])/g, '$1'));
+  return sheetWrap('Planer → Kalender', `
+    <p class="small hint">Exportiert Deadlines (⚑), Zeitblöcke (▶) und eigene Termine als .ics-Datei. Auf dem iPhone die Datei öffnen und <b>„Alle hinzufügen“</b> wählen, am besten in einen eigenen Kalender „Planer“.</p>
+    <div class="srclist">
+      <div class="row gap"><span class="grow">Neu seit letztem Export</span><b>${n.length}</b></div>
+      <div class="row gap"><span class="grow">Geändert</span><b class="${c.length ? 'warn' : ''}">${c.length}</b></div>
+      <div class="row gap"><span class="grow muted">Schon im Kalender, unverändert</span><span class="muted">${items.length - n.length - c.length}</span></div>
+    </div>
+    ${c.length ? `<p class="small warn hint">Bei geänderten Einträgen legt der Apple-Kalender eine zweite Version an. Die alte Version dort bitte löschen: ${c.slice(0, 4).map(title).join(', ')}${c.length > 4 ? ' …' : ''}</p>` : ''}
+    <button class="primary block big" data-a="doExport" data-v="new"${n.length + c.length ? '' : ' disabled'}>Nur Neues & Geändertes (${n.length + c.length})</button>
+    <button class="block" data-a="doExport" data-v="all">Alles exportieren (${items.length})</button>
+    <button class="ghost block small-btn" data-a="resetExport">Export-Verlauf zurücksetzen (nach Löschen des Kalenders „Planer“)</button>`);
 }
 
 const actions = {
@@ -1367,7 +1401,9 @@ const actions = {
     } };
   },
   export: () => download(JSON.stringify(db, null, 2), `planer-backup-${today()}.json`, 'application/json'),
-  exportIcs,
+  exportIcs: () => { ui.sheet = { type: 'export' }; },
+  doExport: ({ v }) => { ui.sheet = null; exportIcs(v); },
+  resetExport: () => { db.settings.exported = {}; save(); toast('Verlauf zurückgesetzt – beim nächsten Export kommt alles neu'); },
   import: () => document.getElementById('importFile').click(),
 };
 
