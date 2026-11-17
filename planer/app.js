@@ -2,6 +2,8 @@
 // Vorlagen mit Rückwärtsplanung, Eisenhower-Matrix, Wochenrückblick, Kalender mit Terminen,
 // Zeitplan (Time-Blocking) und Import aus iPhone-/Outlook-Kalender.
 // Alles bleibt lokal im Browser (localStorage).
+import { sync, initSync, localChanged, syncNow, signIn, signUp, signOut, createFeed } from './sync.js';
+
 const KEY = 'planer.v1';
 const TKEY = 'planer.timer';
 const COLORS = ['#f5b83d', '#4cc38a', '#3ea6ff', '#c77dff', '#ef6b6b', '#f0a04b', '#2dd4bf', '#94a3b8'];
@@ -145,6 +147,7 @@ function normalize(v) {
 let db = (() => { try { return normalize(JSON.parse(localStorage.getItem(KEY))) || blank(); } catch { return blank(); } })();
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast('Speichern fehlgeschlagen – Speicher voll?'); }
+  localChanged();
 }
 let undoSnap = null;
 const snap = () => { undoSnap = JSON.stringify(db); };
@@ -751,6 +754,7 @@ function viewMore() {
   const setChip = (k, v, label) => `<button class="chip${+s[k] === v ? ' on' : ''}" data-a="setS" data-k="${k}" data-v="${v}">${label}</button>`;
   return `
     <button class="banner" data-a="go" data-v="review">🗓 <span class="grow"><b>Wochenrückblick</b><br><small>${s.lastReview ? `Zuletzt: ${dayLabel(s.lastReview)}` : 'Noch nie gemacht'}</small></span> ›</button>
+    ${sync.configured ? `<button class="banner sync-banner" data-a="account">☁︎ <span class="grow"><b>Sync & Claude</b><br><small>${sync.email ? `${esc(sync.email)} · ${SYNC_LABEL[sync.state]}` : 'Handy, Laptop und Claude verbinden'}</small></span> ›</button>` : ''}
 
     <section class="sec"><div class="sec-h"><h3>Vorlagen mit Rückwärtsplanung</h3></div>
       <p class="muted small hint">Für wiederkehrende Ergebnisse wie Bericht, Newsletter oder Präsentation: Deadline eingeben, und die Schritte werden rückwärts auf die Tage davor verteilt.</p>
@@ -1045,6 +1049,41 @@ function sheetChoose(day) {
     </div>`);
 }
 
+const SYNC_LABEL = { off: 'Nicht angemeldet', connecting: 'Verbinde …', ok: 'Synchron', pending: 'Speichere …', offline: 'Offline – wird nachgeholt', error: 'Fehler' };
+function sheetAccount(d) {
+  if (!sync.configured) return sheetWrap('Sync & Claude', '<p class="small hint">Sync ist in dieser Version noch nicht eingerichtet. Die App läuft rein lokal.</p>');
+  if (!sync.email) return sheetWrap('Sync & Claude', `
+    <p class="small hint">Mit einem Konto sind deine Daten auf allen Geräten gleich (Handy, Laptop), und Claude kann Aufgaben und Termine für dich verwalten. Deine bisherigen Daten auf diesem Gerät werden übernommen.</p>
+    <input type="email" data-f="d.email" placeholder="E-Mail" value="${esc(d.email || '')}" autocomplete="email" autocapitalize="off">
+    <input type="password" data-f="d.password" placeholder="Passwort (mind. 8 Zeichen)" value="${esc(d.password || '')}" autocomplete="current-password" style="margin-top:8px">
+    ${d.msg ? `<p class="small hint ${d.msgBad ? 'bad' : 'good'}">${esc(d.msg)}</p>` : ''}
+    <button class="primary block big" data-a="signIn"${d.busy ? ' disabled' : ''}>Anmelden</button>
+    <button class="block" data-a="signUp"${d.busy ? ' disabled' : ''}>Neues Konto erstellen</button>
+    <p class="muted small hint">Beim Erstellen bekommst du eine Bestätigungs-Mail. Link anklicken, dann hier anmelden. Auf jedem weiteren Gerät meldest du dich einfach mit denselben Daten an.</p>`);
+  return sheetWrap('Sync & Claude', `
+    <div class="srclist">
+      <div class="row gap"><span class="grow">Konto</span><b>${esc(sync.email)}</b></div>
+      <div class="row gap"><span class="grow">Status</span><span class="sync-${sync.state}">● ${SYNC_LABEL[sync.state]}</span></div>
+      <div class="row gap"><span class="grow muted">Zuletzt abgeglichen</span><span class="muted">${sync.lastSync ? `${pad(sync.lastSync.getHours())}:${pad(sync.lastSync.getMinutes())}` : '–'}</span></div>
+    </div>
+    ${sync.error ? `<p class="small bad hint">${esc(sync.error)}</p>` : ''}
+    <button class="block" data-a="syncNow">↻ Jetzt abgleichen</button>
+
+    <label class="lbl">Kalender-Abo (iPhone, Mac, Outlook)</label>
+    <p class="small hint">Ein geheimer Link, den dein Kalender abonniert. Er zeigt Deadlines (⚑), Zeitblöcke (▶) und deine eigenen Termine und aktualisiert sich selbst. Kein Export nötig, keine Dubletten. Den Kalender-Namen „Planer“ bitte so lassen, dann werden diese Einträge beim Import nicht doppelt gezählt.</p>
+    ${sync.feedUrl ? `
+      <a class="btn primary block" href="${esc(sync.feedUrl.replace(/^https:/, 'webcal:'))}">📆 Im Kalender abonnieren</a>
+      <button class="block" data-a="copyFeed">Link kopieren</button>
+      <button class="ghost block small-btn" data-a="renewFeed">Neuen Link erzeugen (alter wird ungültig)</button>`
+      : '<button class="primary block" data-a="makeFeed">Abo-Link erstellen</button>'}
+
+    <label class="lbl">Claude als Assistent</label>
+    <p class="small hint">Claude kann deine Aufgaben und Termine lesen und ändern, wenn in deiner Claude-Unterhaltung der <b>Supabase-Connector</b> verbunden ist. Sag zum Beispiel: „Trag mir im Planer ein: Bericht bis Freitag, 2 Stunden, Projekt Arbeit“ oder „Was ist diese Woche überfällig?“. Änderungen erscheinen nach wenigen Sekunden hier.</p>
+
+    <button class="ghost block danger" data-a="signOut">Abmelden</button>
+    <p class="muted small hint">Beim Abmelden bleiben die Daten auf diesem Gerät, werden aber nicht mehr abgeglichen.</p>`);
+}
+
 function sheetConfirm(s) {
   return `<div class="sheet-backdrop" data-a="close"></div>
   <div class="sheet confirm"><div class="sheet-head"><b>${esc(s.text)}</b></div>
@@ -1062,7 +1101,7 @@ function render() {
   const sheet = !s ? '' : {
     edit: () => sheetEdit(s.draft), plan: () => sheetPlan(task(s.id)), project: () => sheetProject(s.draft),
     template: () => sheetTemplate(s.draft), apply: () => sheetApply(s.draft), confirm: () => sheetConfirm(s),
-    event: () => sheetEvent(s.draft), export: () => sheetExport(), paste: () => sheetPaste(s.draft), choose: () => sheetChoose(s.day),
+    event: () => sheetEvent(s.draft), export: () => sheetExport(), account: () => sheetAccount(s.draft), paste: () => sheetPaste(s.draft), choose: () => sheetChoose(s.day),
   }[s.type]();
   const t0 = today();
   const badge = {
@@ -1075,6 +1114,7 @@ function render() {
     <header class="top"><div class="wrap row gap">
       ${ui.view === 'review' ? '<button class="icon-btn" data-a="go" data-v="more" aria-label="Zurück">‹</button>' : ''}
       <h1 class="grow">${ui.view === 'today' && ui.todayMode === 'timeline' && ui.day !== today() ? dayLabel(ui.day) : VIEWS[ui.view]}</h1>
+      ${sync.configured ? `<button class="icon-btn small sync-dot sync-${sync.state}" data-a="account" title="Sync: ${SYNC_LABEL[sync.state]}" aria-label="Sync: ${SYNC_LABEL[sync.state]}">${sync.state === 'off' ? '☁︎' : '●'}</button>` : ''}
       ${ui.view === 'review' ? '' : '<button class="primary new-btn" data-a="new">+ Aufgabe</button>'}</div></header>
     <main class="wrap">${body}</main>
     <nav class="tabs">${Object.entries(TABS).map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-a="go" data-v="${k}">
@@ -1090,10 +1130,22 @@ function render() {
   }
 }
 
+// ---------- Konto ----------
+async function accountCall(fn, okMsg) {
+  const d = ui.sheet.draft;
+  d.busy = true; d.msg = ''; render();
+  try {
+    const r = await fn(d);
+    if (r !== false) { ui.sheet = { type: 'account', draft: {} }; toast(okMsg); }
+  } catch (e) { d.msg = e.message || String(e); d.msgBad = true; }
+  d.busy = false;
+  render();
+}
+
 // ---------- Aktionen ----------
 const newDraft = (preset = {}) => ({
   id: uid(), title: '', notes: '', project: ui.view === 'all' && ui.project && ui.project !== '-' ? ui.project : '',
-  prio: 0, due: null, dueTime: '', plan: ui.view === 'today' ? today() : null, est: 0, spent: 0, repeat: '', subs: [],
+  prio: 0, due: null, dueTime: '', plan: ui.view === 'today' ? today() : null, planTime: '', est: 0, spent: 0, repeat: '', subs: [],
   status: ui.view === 'waiting' ? 'waiting' : 'open', waitingFor: '', followUp: ui.view === 'waiting' ? addDays(today(), 3) : null,
   done: false, doneAt: null, createdAt: Date.now(), ...preset,
 });
@@ -1260,6 +1312,22 @@ const actions = {
     toast(left.length ? `${placed} eingeplant, ${left.length} ${left.length === 1 ? 'passt' : 'passen'} heute nicht mehr rein` : `${placed} Aufgabe${placed === 1 ? '' : 'n'} in freie Zeit gelegt`, true);
   },
   clearTimes: ({ v }) => { snap(); db.tasks.forEach(t => { if (t.plan === v && !t.done) t.planTime = ''; }); save(); toast('Zeitblöcke entfernt', true); },
+  account: () => { ui.sheet = { type: 'account', draft: { email: '', password: '' } }; },
+  signIn: () => accountCall(d => signIn(d.email.trim(), d.password), 'Angemeldet – Daten werden abgeglichen'),
+  signUp: () => accountCall(async d => {
+    if ((d.password || '').length < 8) throw new Error('Passwort bitte mit mindestens 8 Zeichen');
+    const needsConfirm = await signUp(d.email.trim(), d.password);
+    if (needsConfirm) { d.msg = 'Fast geschafft: Bitte den Link in der Bestätigungs-Mail öffnen und dich danach hier anmelden.'; d.msgBad = false; return false; }
+  }, 'Konto erstellt – Daten werden hochgeladen'),
+  signOut: () => { signOut(); ui.sheet = null; toast('Abgemeldet – Daten bleiben auf diesem Gerät'); },
+  syncNow: () => { syncNow().then(() => { toast('Abgeglichen'); render(); }).catch(e => toast(e.message)); },
+  makeFeed: () => { createFeed().then(render).catch(e => toast(e.message)); },
+  renewFeed: () => {
+    ui.sheet = { type: 'confirm', text: 'Neuen Abo-Link erzeugen? Der alte funktioniert dann nicht mehr und muss im Kalender ersetzt werden.', yes: 'Erzeugen', run: () => {
+      createFeed(true).then(() => { ui.sheet = { type: 'account', draft: {} }; render(); }).catch(e => toast(e.message));
+    } };
+  },
+  copyFeed: () => { navigator.clipboard.writeText(sync.feedUrl).then(() => toast('Link kopiert')).catch(() => toast(sync.feedUrl)); },
   pasteSheet: () => { ui.sheet = { type: 'paste', draft: { text: '' } }; },
   pasteClip: async () => {
     try {
@@ -1490,6 +1558,19 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { ti
 
 render();
 tickTimer();
+
+initSync({
+  getDb: () => db,
+  replaceDb: next => { db = normalize(next) || db; save(); if (!ui.sheet || ['account', 'export'].includes(ui.sheet.type)) render(); else renderSoon(); },
+  onStatus: () => { if (!ui.sheet || ui.sheet.type === 'account') render(); else updateSyncDot(); },
+});
+// Während ein Fenster offen ist, die Seite dahinter nicht neu zeichnen (Eingaben bleiben erhalten).
+let renderSoonTimer;
+function renderSoon() { clearTimeout(renderSoonTimer); renderSoonTimer = setTimeout(() => { if (!ui.sheet) render(); else renderSoon(); }, 1500); }
+function updateSyncDot() {
+  const el = $app.querySelector('.sync-dot');
+  if (el) { el.className = `icon-btn small sync-dot sync-${sync.state}`; el.textContent = sync.state === 'off' ? '☁︎' : '●'; }
+}
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

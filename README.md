@@ -35,5 +35,11 @@ Dazu kommen Priorität, geschätzter Aufwand, Fokus-Timer mit erfasster Zeit, Te
 **Schnelleingabe**: `bis fr` / `bis 15.12. 10:00` setzt die Deadline, `@mo` den Plan-Tag, `~2h` den Aufwand,
 `#Projekt` das Projekt, `!` heißt wichtig, `!!` dringend.
 
+### Sync & Claude (Supabase)
+Mit Konto (Mehr → Sync & Claude) sind die Daten auf allen Geräten gleich, und Claude-Agenten können Aufgaben und Termine über den Supabase-Connector verwalten (Anleitung: `planer/CLAUDE-AGENT.md`).
+- Datenbank-Schema: `supabase/migrations/`, Kalender-Abo-Dienst: `supabase/functions/planer-ics/`
+- Verbindung: `planer/config.js` (Projekt-URL und Publishable-Key). Leer = rein lokal.
+- Kalender-Abo: In der App einen geheimen Link erzeugen und im Kalender abonnieren. Der Inhalt wird bei jeder Aktualisierung ersetzt, dadurch entstehen keine Dubletten.
+
 Lokal: `python3 -m http.server 8765` und dann http://localhost:8765/planer/ öffnen.
 Nach Änderungen in `planer/sw.js` die `VERSION` erhöhen.
