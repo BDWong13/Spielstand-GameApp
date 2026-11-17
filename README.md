@@ -20,11 +20,12 @@ und in `sw.js` zur `ASSETS`-Liste hinzufügen.
 
 ## Planer (Aufgaben & Deadlines)
 Im Ordner `planer/` liegt eine eigene Offline-App zum Planen von Aufgaben:
-- **Heute**: Überfälliges, was heute ansteht, Leute zum Nachfassen und was bald fällig, aber noch nicht eingeplant ist. Dazu eine Warnung, wenn mehr geplant ist als die Tageskapazität.
+- **Heute**: Liste oder **Zeitplan** (Termine und Aufgaben-Zeitblöcke auf einer Zeitachse; ⚡ legt Aufgaben automatisch in freie Lücken). Dazu Überfälliges, was heute ansteht, Leute zum Nachfassen und was bald fällig, aber noch nicht eingeplant ist. Dazu eine Warnung, wenn mehr geplant ist als die Tageskapazität.
 - **Woche**: Wochenplan (KW) mit Auslastungsbalken pro Tag, Deadlines als Markierung und ein Pool „Noch nicht eingeplant“.
 - **Alle**: Liste mit Suche und Filtern oder Eisenhower-Matrix (wichtig/dringend).
 - **Warten**: Delegiertes und Dinge, auf die du wartest, gruppiert nach Person, mit Nachfass-Datum.
-- **Mehr**: Wochenrückblick, Vorlagen mit Rückwärtsplanung, Projekte, Einstellungen, Backup und Kalender-Export (.ics).
+- **Kalender**: Eigene Termine (auch wiederkehrend) sowie Import aus dem iPhone-Kalender per Kurzbefehl oder als .ics-Datei (Outlook, Google, Mac). Termine verringern die freie Zeit pro Tag, ganztägige Termine wie „Urlaub“ blockieren den Tag. Export als .ics mit Deadlines, Zeitblöcken und eigenen Terminen.
+- **Mehr**: Wochenrückblick, Vorlagen mit Rückwärtsplanung, Projekte, Einstellungen, Kalender und Backup.
 
 Jede Aufgabe hat eine **Deadline** (bis wann fertig) und einen **Plan-Tag** (wann du daran arbeitest).
 Dazu kommen Priorität, geschätzter Aufwand, Fokus-Timer mit erfasster Zeit, Teilschritte, Notizen und Wiederholung.

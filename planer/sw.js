@@ -1,6 +1,6 @@
 // Service Worker des Planers: cacht alle Dateien, danach läuft der Planer ohne Internet.
 // Bei Änderungen VERSION erhöhen, damit Geräte die neue Fassung laden.
-const VERSION = 'planer-v2';
+const VERSION = 'planer-v3';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'style.css', 'app.js',
   '../icon-180.png', '../icon-192.png', '../icon-512.png',

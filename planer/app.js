@@ -1,5 +1,6 @@
 // Planer: Aufgaben, Deadlines, Wochenplanung mit Kapazität, „Warten auf“, Fokus-Timer,
-// Vorlagen mit Rückwärtsplanung, Eisenhower-Matrix, Wochenrückblick und Kalender-Export.
+// Vorlagen mit Rückwärtsplanung, Eisenhower-Matrix, Wochenrückblick, Kalender mit Terminen,
+// Zeitplan (Time-Blocking) und Import aus iPhone-/Outlook-Kalender.
 // Alles bleibt lokal im Browser (localStorage).
 const KEY = 'planer.v1';
 const TKEY = 'planer.timer';
@@ -13,7 +14,9 @@ const DEFAULT_TEMPLATES = [
   { id: 'tpl-praesi', name: 'Präsentation', project: '', text:
     'T-7 Storyline & Kernaussagen festlegen ~1h\nT-5 Analyse / Zahlen aufbereiten ~3h\nT-3 Folien bauen ~3h\nT-2 Probelauf & Feedback ~1h\nT-1 Finalisieren ~1h\nT Präsentieren' },
 ];
-const DEFAULT_SETTINGS = { capacity: 360, focus: 25, skipWeekend: true, lastReview: null };
+const DEFAULT_SETTINGS = { capacity: 360, focus: 25, skipWeekend: true, lastReview: null, workStart: '08:00', workEnd: '17:00' };
+const BLOCK_RE = /urlaub|krank|feiertag|abwesend|frei\b|out of office|\booo\b|vacation|holiday/i;
+const EV_REPEATS = { '': 'Keine', daily: 'Täglich', weekdays: 'Werktags', weekly: 'Wöchentlich', monthly: 'Monatlich' };
 
 // ---------- Hilfen ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -46,6 +49,9 @@ const dayLabel = s => {
 };
 const fmtMin = m => m < 60 ? `${m} min` : (m % 60 ? `${Math.floor(m / 60)}:${pad(m % 60)} h` : `${m / 60} h`);
 const sumEst = list => list.reduce((a, t) => a + (+t.est || 0), 0);
+const toMin = s => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+const fromMin = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+const nowMin = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
 const isoWeek = s => {
   const d = parse(s); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
   const w1 = new Date(d.getFullYear(), 0, 4);
@@ -112,7 +118,7 @@ function blank() {
       { id: 'p-arbeit', name: 'Arbeit', color: '#3ea6ff' },
       { id: 'p-privat', name: 'Privat', color: '#4cc38a' },
     ],
-    tasks: [], templates: structuredClone(DEFAULT_TEMPLATES),
+    tasks: [], events: [], templates: structuredClone(DEFAULT_TEMPLATES),
     settings: { ...DEFAULT_SETTINGS, lastReview: today() },
   };
 }
@@ -121,10 +127,15 @@ function normalize(v) {
   return {
     projects: Array.isArray(v.projects) ? v.projects : [],
     templates: Array.isArray(v.templates) ? v.templates : structuredClone(DEFAULT_TEMPLATES),
+    events: (Array.isArray(v.events) ? v.events : []).filter(e => e && e.date).map(e => ({
+      id: e.id || uid(), title: String(e.title || ''), date: e.date, endDate: e.endDate || null,
+      start: e.start || '', end: e.end || '', allDay: !!e.allDay, blocks: !!e.blocks, repeat: e.repeat || '',
+      location: e.location || '', notes: e.notes || '', source: e.source || '', uid: e.uid || '',
+    })),
     settings: { ...DEFAULT_SETTINGS, lastReview: today(), ...(v.settings || {}) },
     tasks: v.tasks.map(t => ({
       id: t.id || uid(), title: String(t.title || ''), notes: t.notes || '', project: t.project || '',
-      prio: +t.prio || 0, due: t.due || null, dueTime: t.dueTime || '', plan: t.plan || null,
+      prio: +t.prio || 0, due: t.due || null, dueTime: t.dueTime || '', plan: t.plan || null, planTime: t.plan && t.planTime || '',
       est: +t.est || 0, spent: +t.spent || 0, repeat: t.repeat || '', subs: Array.isArray(t.subs) ? t.subs : [],
       status: t.status === 'waiting' ? 'waiting' : 'open', waitingFor: t.waitingFor || '', followUp: t.followUp || null,
       done: !!t.done, doneAt: t.doneAt || null, createdAt: t.createdAt || Date.now(),
@@ -157,6 +168,208 @@ function projectByName(name) {
   return p.id;
 }
 
+// ---------- Kalender ----------
+function occursOn(e, day) {
+  if (day < e.date) return false;
+  if (!e.repeat) return day <= (e.endDate || e.date);
+  if (e.repeat === 'daily') return true;
+  if (e.repeat === 'weekdays') return !isWeekend(day);
+  if (e.repeat === 'weekly') return parse(day).getDay() === parse(e.date).getDay();
+  if (e.repeat === 'monthly') return parse(day).getDate() === parse(e.date).getDate();
+  return false;
+}
+// Termine eines Tages mit Minuten (s/en) für diesen Tag; mehrtägige Termine werden passend beschnitten.
+function eventsOn(day) {
+  return db.events.filter(e => occursOn(e, day)).map(e => {
+    let s = e.allDay ? 0 : toMin(e.start), en = e.allDay ? 1440 : (e.end ? toMin(e.end) : s + 60);
+    if (!e.repeat && !e.allDay && e.endDate && e.endDate !== e.date) {
+      if (day !== e.date) s = 0;
+      if (day !== e.endDate) en = 1440;
+    } else if (en <= s) en = Math.min(1440, s + 30);
+    return { ...e, s, en };
+  }).sort((a, b) => b.allDay - a.allDay || a.s - b.s);
+}
+const blockedOn = day => eventsOn(day).some(e => e.allDay && e.blocks);
+const work = () => [toMin(db.settings.workStart || '08:00'), toMin(db.settings.workEnd || '17:00')];
+function mergeIv(iv) {
+  const out = [];
+  iv.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b]) => {
+    const last = out[out.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b); else out.push([a, b]);
+  });
+  return out;
+}
+// Freie Minuten innerhalb der Arbeitszeit nach Abzug der Termine
+function freeOn(day) {
+  if (blockedOn(day)) return 0;
+  const [ws, we] = work();
+  const busy = mergeIv(eventsOn(day).filter(e => !e.allDay).map(e => [Math.max(ws, e.s), Math.min(we, e.en)]));
+  return Math.max(0, we - ws - busy.reduce((a, [x, y]) => a + y - x, 0));
+}
+const capOn = day => Math.min(cap(), freeOn(day));
+const meetingMin = day => { const [ws, we] = work(); return mergeIv(eventsOn(day).filter(e => !e.allDay).map(e => [Math.max(ws, e.s), Math.min(we, e.en)])).reduce((a, [x, y]) => a + y - x, 0); };
+
+// Aufgaben automatisch in freie Lücken legen (nach Priorität, dann Deadline)
+function autoPlan(day) {
+  const t0 = today();
+  const [ws, we] = work();
+  if (blockedOn(day)) return { placed: 0, left: [] };
+  const start = day === t0 ? Math.max(ws, Math.ceil(nowMin() / 15) * 15) : ws;
+  const busy = eventsOn(day).filter(e => !e.allDay).map(e => [e.s, e.en]);
+  db.tasks.filter(t => t.plan === day && t.planTime && !t.done).forEach(t => busy.push([toMin(t.planTime), toMin(t.planTime) + (t.est || 30)]));
+  const cand = active().filter(t => !(t.plan === day && t.planTime) && (day === t0
+    ? (t.plan && t.plan <= t0) || (t.due && t.due <= t0)
+    : t.plan === day)).sort(byPrio);
+  let placed = 0; const left = [];
+  for (const t of cand) {
+    const dur = t.est || 30;
+    let s = start, ok = false;
+    while (s + dur <= we) {
+      const clash = busy.find(([a, b]) => s < b && s + dur > a);
+      if (!clash) { ok = true; break; }
+      s = Math.ceil(clash[1] / 5) * 5;
+    }
+    if (ok) { t.plan = day; t.planTime = fromMin(s); busy.push([s, s + dur]); placed++; } else left.push(t);
+  }
+  return { placed, left };
+}
+
+// ---------- Import: .ics-Dateien und iPhone-Kurzbefehl ----------
+const unescIcs = s => String(s || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
+function parseIcs(text) {
+  const lines = text.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+  const out = []; let cur = null;
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT') { cur = {}; continue; }
+    if (line === 'END:VEVENT') { if (cur) out.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    const m = line.match(/^([A-Z-]+)((?:;[^:]*)?):(.*)$/);
+    if (!m) continue;
+    const [, name, params, value] = m;
+    if (name === 'EXDATE') (cur.EXDATE ||= []).push(...value.split(','));
+    else if (name === 'RECURRENCE-ID') cur.RID = { params, value };
+    else cur[name] = { params, value };
+  }
+  return out;
+}
+// Zeiten mit TZID werden als Ortszeit gelesen (passt, solange Kalender und Gerät in derselben Zeitzone sind).
+function icsDate(p) {
+  const v = String(p?.value || '').trim();
+  let m = v.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return { date: `${m[1]}-${m[2]}-${m[3]}`, time: '', allDay: true };
+  m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/);
+  if (!m) return null;
+  if (m[7]) {
+    const d = new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]));
+    return { date: iso(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+  }
+  return { date: `${m[1]}-${m[2]}-${m[3]}`, time: `${m[4]}:${m[5]}` };
+}
+const DAYCODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+function expandRrule(rule, start, from, to, ex) {
+  const o = Object.fromEntries(rule.split(';').map(x => x.split('=')));
+  const iv = +o.INTERVAL || 1, count = +o.COUNT || 0;
+  const until = o.UNTIL ? icsDate({ value: o.UNTIL })?.date : null;
+  const byday = o.BYDAY ? o.BYDAY.split(',').map(x => DAYCODES.indexOf(x.slice(-2))).filter(x => x >= 0) : [];
+  const end = until && until < to ? until : to;
+  const out = []; let n = 0;
+  const push = d => { n++; if (d >= from && !ex.includes(d)) out.push(d); };
+  if (o.FREQ === 'WEEKLY') {
+    const days = byday.length ? byday : [parse(start).getDay()];
+    for (let wk = mondayOf(start), i = 0; i < 600 && wk <= end; i++, wk = addDays(wk, 7 * iv)) {
+      for (const d of days.map(x => addDays(wk, (x + 6) % 7)).sort()) {
+        if (d < start || d > end) continue;
+        if (count && n >= count) return out;
+        push(d);
+      }
+    }
+  } else if (['DAILY', 'MONTHLY', 'YEARLY'].includes(o.FREQ)) {
+    for (let i = 0, d = start; i < 3000 && d <= end; i++) {
+      if (count && n >= count) break;
+      if (!(o.FREQ === 'DAILY' && byday.length && !byday.includes(parse(d).getDay()))) push(d);
+      d = o.FREQ === 'DAILY' ? addDays(d, iv) : addMonths(start, (o.FREQ === 'MONTHLY' ? iv : 12 * iv) * (i + 1));
+    }
+  } else push(start);
+  return out;
+}
+function icsToEvents(raw, source) {
+  const from = addDays(today(), -30), to = addDays(today(), 400);
+  const overrides = new Set(raw.filter(r => r.RID).map(r => `${r.UID?.value}|${icsDate(r.RID)?.date}`));
+  const out = [];
+  for (const r of raw) {
+    if (!r.DTSTART || r.STATUS?.value === 'CANCELLED') continue;
+    const st = icsDate(r.DTSTART); if (!st) continue;
+    let en = r.DTEND ? icsDate(r.DTEND) : null;
+    if (!en && r.DURATION) {
+      const m = r.DURATION.value.match(/P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/) || [];
+      const mins = ((+m[1] || 0) * 7 * 1440) + ((+m[2] || 0) * 1440) + ((+m[3] || 0) * 60) + (+m[4] || 0);
+      const total = toMin(st.time) + mins;
+      en = st.allDay ? { date: addDays(st.date, Math.max(1, Math.round(mins / 1440))) } : { date: addDays(st.date, Math.floor(total / 1440)), time: fromMin(total % 1440) };
+    }
+    let endDate = st.date, endTime = '';
+    if (st.allDay) endDate = en ? addDays(en.date, -1) : st.date;
+    else if (en) { endDate = en.date; endTime = en.time || ''; if (endTime === '00:00' && endDate > st.date) { endDate = addDays(endDate, -1); endTime = '23:59'; } }
+    else endTime = fromMin(Math.min(1439, toMin(st.time) + 60));
+    if (endDate < st.date) endDate = st.date;
+    const span = diff(st.date, endDate);
+    const title = unescIcs(r.SUMMARY?.value) || '(ohne Titel)';
+    const u = r.UID?.value || '';
+    const ex = (r.EXDATE || []).map(x => icsDate({ value: x })?.date);
+    const dates = r.RRULE && !r.RID ? expandRrule(r.RRULE.value, st.date, from, to, ex) : [st.date];
+    for (const d of dates) {
+      if (addDays(d, span) < from || d > to) continue;
+      if (r.RRULE && overrides.has(`${u}|${d}`)) continue;
+      out.push({
+        id: uid(), title, date: d, endDate: span ? addDays(d, span) : null,
+        start: st.allDay ? '' : st.time, end: st.allDay ? '' : endTime, allDay: !!st.allDay,
+        blocks: !!st.allDay && BLOCK_RE.test(title), repeat: '', location: unescIcs(r.LOCATION?.value), notes: '', source, uid: u,
+      });
+    }
+  }
+  return out;
+}
+function parseAnyDate(v) {
+  v = String(v || '').trim();
+  let m = v.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2}))?/);
+  if (m && m[4] && /([zZ]|[+-]\d{2}:?\d{2})$/.test(v)) {
+    const d = new Date(v);
+    if (!isNaN(d)) return { date: iso(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+  }
+  if (m) return { date: `${m[1]}-${m[2]}-${m[3]}`, time: m[4] ? `${pad(+m[4])}:${m[5]}` : '' };
+  m = v.match(/^(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{2,4})(?:,?\s*(?:um\s*)?(\d{1,2}):(\d{2}))?/);
+  if (m) { let y = +m[3]; if (y < 100) y += 2000; return { date: `${y}-${pad(+m[2])}-${pad(+m[1])}`, time: m[4] ? `${pad(+m[4])}:${m[5]}` : '' }; }
+  return null;
+}
+// Zeilen vom Kurzbefehl: Start | Ende | Titel | Kalender | Ganztägig
+function parseShortcut(text) {
+  const out = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const parts = line.split('|').map(x => x.trim());
+    if (parts.length < 3) continue;
+    const st = parseAnyDate(parts[0]); if (!st) continue;
+    const en = parseAnyDate(parts[1]);
+    const allDay = /^(ja|yes|true|1|wahr)$/i.test(parts[4] || '') || (!st.time && !(en && en.time));
+    let endDate = en ? en.date : st.date, endTime = en ? en.time : '';
+    if (allDay) { if (en && en.time === '00:00' && endDate > st.date) endDate = addDays(endDate, -1); }
+    else if (endTime === '00:00' && endDate > st.date) { endDate = addDays(endDate, -1); endTime = '23:59'; }
+    if (endDate < st.date) endDate = st.date;
+    const title = parts[2] || '(ohne Titel)';
+    out.push({
+      id: uid(), title, date: st.date, endDate: endDate !== st.date ? endDate : null,
+      start: allDay ? '' : st.time, end: allDay ? '' : (endTime || fromMin(Math.min(1439, toMin(st.time) + 60))), allDay,
+      blocks: allDay && BLOCK_RE.test(title), repeat: '', location: '', notes: parts[3] ? `Kalender: ${parts[3]}` : '', source: 'iphone', uid: '',
+    });
+  }
+  return out;
+}
+const srcLabel = s => s === 'iphone' ? 'iPhone-Kalender' : s.startsWith('ics:') ? s.slice(4) : 'Planer';
+function importEvents(list, source) {
+  snap();
+  db.events = db.events.filter(e => e.source !== source).concat(list);
+  save();
+  toast(`${list.length} Termine aus „${srcLabel(source)}“ übernommen`, true);
+}
+
 // ---------- Zustand ----------
 const TABS = { today: 'Heute', week: 'Woche', all: 'Alle', waiting: 'Warten', more: 'Mehr' };
 const VIEWS = { ...TABS, review: 'Wochenrückblick' };
@@ -164,6 +377,7 @@ const ui = {
   view: VIEWS[location.hash.slice(2)] ? location.hash.slice(2) : 'today',
   weekStart: mondayOf(today()),
   filter: 'open', project: '', sort: 'due', mode: 'list', q: '', quick: '',
+  todayMode: 'list', day: today(),
   showDone: false, sheet: null, focus: null,
 };
 
@@ -266,7 +480,9 @@ function row(t, o = {}) {
   }
   meta.push(dueBadge(t));
   if (t.plan && !o.hidePlan && !t.done && t.status !== 'waiting') {
-    meta.push(`<span class="badge b-plan">📅 ${t.plan < today() ? 'seit ' : ''}${dayLabel(t.plan)}</span>`);
+    meta.push(`<span class="badge b-plan">📅 ${t.plan < today() ? 'seit ' : ''}${dayLabel(t.plan)}${t.planTime ? ` ${t.planTime}` : ''}</span>`);
+  } else if (t.planTime && o.hidePlan && !t.done) {
+    meta.push(`<span class="badge b-plan">🕘 ${t.planTime}</span>`);
   }
   if (!t.done && t.plan && t.due && t.plan > t.due) meta.push('<span class="badge b-over">nach Deadline!</span>');
   if (t.subs.length) meta.push(`<span>☑ ${subsDone}/${t.subs.length}</span>`);
@@ -307,13 +523,64 @@ const quickInput = placeholder => `
     <button class="primary" data-a="quickAdd" aria-label="Hinzufügen">+</button>
   </div>`;
 
-const capBar = mins => {
-  const c = cap(), pct = Math.min(100, Math.round(mins / c * 100));
+const capBar = (mins, c = cap()) => {
+  const pct = c ? Math.min(100, Math.round(mins / c * 100)) : 100;
   return `<span class="cap${mins > c ? ' over' : ''}"><small>${fmtMin(mins)} / ${fmtMin(c)}</small><span class="bar"><i style="width:${pct}%"></i></span></span>`;
 };
 
 // ---------- Ansichten ----------
+const evTime = e => e.allDay ? (e.blocks ? 'blockiert' : 'ganztägig') : `${fromMin(e.s)}–${fromMin(Math.min(e.en, 1439))}`;
+const evRow = e => `<button class="ev plain${e.blocks ? ' blocks' : ''}" data-a="editEvent" data-id="${e.id}"><span class="evt">${evTime(e)}</span><span class="grow">${esc(e.title)}${e.location ? ` <span class="muted">· ${esc(e.location)}</span>` : ''}</span></button>`;
+const modeSwitch = () => `<div class="chips seg"><button class="chip${ui.todayMode === 'list' ? ' on' : ''}" data-a="set" data-k="todayMode" data-v="list">☰ Liste</button><button class="chip${ui.todayMode === 'timeline' ? ' on' : ''}" data-a="todayTimeline">🕘 Zeitplan</button></div>`;
+
+function viewTimeline() {
+  const t0 = today(), day = ui.day;
+  const [ws, we] = work();
+  const ev = eventsOn(day);
+  const allDay = ev.filter(e => e.allDay);
+  const items = [
+    ...ev.filter(e => !e.allDay).map(e => ({ kind: 'ev', id: e.id, s: e.s, en: e.en, title: e.title, sub: e.location })),
+    ...db.tasks.filter(t => t.plan === day && t.planTime && t.status !== 'waiting').map(t => ({ kind: 'task', id: t.id, s: toMin(t.planTime), en: Math.min(1440, toMin(t.planTime) + (t.est || 30)), title: t.title, done: t.done, prio: t.prio })),
+  ].sort((a, b) => a.s - b.s || b.en - a.en);
+  // Überlappungen nebeneinander anordnen
+  const groups = []; let g = [], gEnd = -1;
+  for (const i of items) { if (g.length && i.s >= gEnd) { groups.push(g); g = []; gEnd = -1; } g.push(i); gEnd = Math.max(gEnd, i.en); }
+  if (g.length) groups.push(g);
+  groups.forEach(gr => { const ends = []; gr.forEach(i => { let l = ends.findIndex(e => e <= i.s); if (l < 0) { l = ends.length; ends.push(0); } ends[l] = i.en; i.lane = l; }); gr.forEach(i => { i.lanes = ends.length; }); });
+  const from = Math.floor(Math.min(ws, ...items.map(i => i.s)) / 60) * 60;
+  const to = Math.min(1440, Math.ceil(Math.max(we, ...items.map(i => i.en)) / 60) * 60);
+  const PX = 1.1;
+  const unsched = active().filter(t => !(t.plan === day && t.planTime) && (day === t0 ? (t.plan && t.plan <= t0) || (t.due && t.due <= t0) : t.plan === day)).sort(byPrio);
+  const blockedMin = items.filter(i => i.kind === 'task' && !i.done).reduce((a, i) => a + i.en - i.s, 0);
+  const free = freeOn(day);
+  const hours = []; for (let m = from; m <= to; m += 60) hours.push(m);
+  const now = day === t0 ? nowMin() : -1;
+  return `
+    <div class="weeknav row gap">
+      <button class="icon-btn" data-a="day" data-v="-1" aria-label="Vorheriger Tag">‹</button>
+      <div class="grow center"><b>${WDL[parse(day).getDay()]}, ${short(day)}</b><div class="muted small">${blockedOn(day) ? 'Tag blockiert' : `Termine ${fmtMin(meetingMin(day)) || '–'} · frei ${fmtMin(free)}${blockedMin ? ` · Aufgaben ${fmtMin(blockedMin)}` : ''}`}</div></div>
+      <button class="icon-btn" data-a="day" data-v="1" aria-label="Nächster Tag">›</button>
+    </div>
+    ${day !== t0 ? '<button class="ghost block" data-a="day" data-v="0">Zu heute</button>' : ''}
+    <div class="row gap tl-actions">
+      <button class="primary grow" data-a="autoPlan"${unsched.length ? '' : ' disabled'}>⚡ ${unsched.length} Aufgabe${unsched.length === 1 ? '' : 'n'} in freie Zeit legen</button>
+      <button data-a="newEvent" data-v="${day}">+ Termin</button>
+    </div>
+    ${allDay.length ? `<div class="allday">${allDay.map(evRow).join('')}</div>` : ''}
+    <div class="timeline" style="height:${(to - from) * PX}px">
+      ${hours.map(m => `<div class="hr" style="top:${(m - from) * PX}px"><span>${pad(m / 60)}:00</span></div>`).join('')}
+      <div class="work" style="top:${(ws - from) * PX}px;height:${(we - ws) * PX}px"></div>
+      ${items.map(i => `<button class="blk ${i.kind}${i.done ? ' done' : ''}${i.kind === 'task' ? ' prio' + i.prio : ''}" data-a="${i.kind === 'ev' ? 'editEvent' : 'edit'}" data-id="${i.id}"
+        style="top:${(i.s - from) * PX}px;height:${Math.max(20, (i.en - i.s) * PX - 2)}px;left:calc(46px + (100% - 50px) * ${i.lane} / ${i.lanes});width:calc((100% - 50px) / ${i.lanes} - 3px)">
+        <b>${esc(i.title)}</b><small>${fromMin(i.s)}–${fromMin(Math.min(i.en, 1439))}${i.sub ? ' · ' + esc(i.sub) : ''}</small></button>`).join('')}
+      ${now >= from && now <= to ? `<div class="now" style="top:${(now - from) * PX}px"></div>` : ''}
+    </div>
+    ${items.some(i => i.kind === 'task') ? `<button class="ghost block" data-a="clearTimes" data-v="${day}">Zeitblöcke dieses Tages entfernen</button>` : ''}
+    ${section('Noch ohne Uhrzeit', unsched, { focus: true, hint: 'Mit ⚡ füllt der Planer die Lücken zwischen deinen Terminen, wichtige Aufgaben zuerst. Eine feste Uhrzeit setzt du in der Aufgabe.' })}`;
+}
+
 function viewToday() {
+  if (ui.todayMode === 'timeline') return modeSwitch() + viewTimeline();
   const t0 = today();
   const a = active();
   const overdue = a.filter(t => t.due && t.due < t0).sort(byDue);
@@ -326,6 +593,8 @@ function viewToday() {
   const pct = planned.length + doneToday.length ? Math.round(doneToday.length / (planned.length + doneToday.length) * 100) : 0;
   const d = new Date();
   const reviewDue = !db.settings.lastReview || diff(db.settings.lastReview, t0) >= 7;
+  const evs = eventsOn(t0).filter(e => e.allDay || e.en > nowMin());
+  const nextEv = evs.find(e => !e.allDay && e.s >= nowMin());
   return `
     ${reviewDue ? '<button class="banner" data-a="go" data-v="review">🗓 <span class="grow"><b>Wochenrückblick fällig</b><br><small>15 Minuten: aufräumen, neu planen, nächste Woche vorbereiten</small></span> ›</button>' : ''}
     <div class="hero">
@@ -334,11 +603,13 @@ function viewToday() {
         <div><b>${planned.length}</b><span>offen heute</span></div>
         <div><b class="${overdue.length ? 'bad' : ''}">${overdue.length}</b><span>überfällig</span></div>
         <div><b class="good">${doneToday.length}</b><span>erledigt</span></div>
-        <div><b class="${est > cap() ? 'warn' : ''}">${est ? fmtMin(est) : '–'}</b><span>Aufwand</span></div>
+        <div><b class="${est > capOn(t0) ? 'warn' : ''}">${est ? fmtMin(est) : '–'}</b><span>Aufwand / ${fmtMin(capOn(t0))} frei</span></div>
       </div>
       <div class="bar"><i style="width:${pct}%"></i></div>
-      ${est > cap() ? `<p class="small warn hint">Mehr geplant als deine Tageskapazität (${fmtMin(cap())}). Schieb etwas mit 📅 auf einen anderen Tag.</p>` : ''}
+      ${est > capOn(t0) ? `<p class="small warn hint">Mehr geplant, als heute frei ist (${fmtMin(capOn(t0))}${meetingMin(t0) ? ` nach ${fmtMin(meetingMin(t0))} Terminen` : ''}). Schieb etwas mit 📅 auf einen anderen Tag.</p>` : ''}
     </div>
+    ${modeSwitch()}
+    ${evs.length ? `<section class="sec"><div class="sec-h"><h3>Termine heute</h3><span class="muted small">${nextEv ? `nächster ${nextEv.s - nowMin() < 60 ? `in ${nextEv.s - nowMin()} min` : `um ${fromMin(nextEv.s)}`}` : ''}</span></div>${evs.map(evRow).join('')}</section>` : ''}
     ${quickInput('z. B. „Bericht bis fr ~2h #Arbeit !“')}
     ${section('Überfällig', overdue, { focus: true, cls: 'over' })}
     ${section('Heute', todays, { focus: true, always: true, empty: overdue.length ? 'Erst das Überfällige 💪' : 'Nichts geplant. Hol dir etwas aus „Bald fällig“ oder plane in der Woche.' })}
@@ -362,22 +633,25 @@ function viewWeek() {
       <button class="icon-btn" data-a="week" data-v="7" aria-label="Nächste Woche">›</button>
     </div>
     ${ui.weekStart !== mondayOf(t0) ? '<button class="ghost block" data-a="week" data-v="0">Zur aktuellen Woche</button>' : ''}
-    ${section('Noch nicht eingeplant', pool, { extra: `${pool.length}${sumEst(pool) ? ` · ${fmtMin(sumEst(pool))}` : ''}`, hint: 'Mit 📅 einem Tag zuordnen. Die Tage zeigen, wie voll sie schon sind.' })}
+    ${section('Noch nicht eingeplant', pool, { extra: `${pool.length}${sumEst(pool) ? ` · ${fmtMin(sumEst(pool))}` : ''}`, hint: 'Mit 📅 einem Tag zuordnen. Die Balken zeigen, wie voll ein Tag ist (Aufgaben ÷ freie Zeit nach Terminen).' })}
     ${days.map(day => {
       const planned = db.tasks.filter(t => t.plan === day && t.status !== 'waiting').sort((a, b) => a.done - b.done || byPrio(a, b));
       const deadlines = open().filter(t => t.due === day && t.plan !== day).sort(byDue);
       const est = sumEst(planned.filter(t => !t.done));
+      const evs = eventsOn(day);
       const d = parse(day);
       const isToday = day === t0;
       return `<section class="sec day${isToday ? ' is-today' : ''}${day < t0 ? ' past' : ''}">
         <div class="sec-h">
           <h3>${WDL[d.getDay()]} <span class="muted">${short(day)}</span>${isToday ? ' <span class="badge b-today">Heute</span>' : ''}</h3>
-          ${est ? capBar(est) : ''}
-          <button class="icon-btn small" data-a="new" data-plan="${day}" aria-label="Aufgabe für diesen Tag">+</button>
+          ${blockedOn(day) ? '<span class="badge b-wait">blockiert</span>' : est || evs.length ? capBar(est, capOn(day)) : ''}
+          <button class="icon-btn small" data-a="openDay" data-v="${day}" aria-label="Zeitplan dieses Tages" title="Zeitplan">🕘</button>
+          <button class="icon-btn small" data-a="choose" data-v="${day}" aria-label="Neu für diesen Tag">+</button>
         </div>
+        ${evs.map(evRow).join('')}
         ${deadlines.map(t => `<button class="deadline plain" data-a="edit" data-id="${t.id}">⚑ Deadline: <b>${esc(t.title)}</b>${t.dueTime ? ` · ${t.dueTime}` : ''}${t.status === 'waiting' ? ` <span class="muted">(⏳ ${esc(t.waitingFor)})</span>` : t.plan ? ` <span class="muted">(geplant ${dayLabel(t.plan)})</span>` : ' <span class="bad">(nicht eingeplant)</span>'}</button>`).join('')}
         ${planned.map(t => row(t, { hidePlan: true })).join('')}
-        ${!planned.length && !deadlines.length ? '<div class="empty small">frei</div>' : ''}
+        ${!planned.length && !deadlines.length && !evs.length ? '<div class="empty small">frei</div>' : ''}
       </section>`;
     }).join('')}`;
 }
@@ -469,6 +743,7 @@ function viewMore() {
   const none = stats('');
   const doneCount = db.tasks.filter(t => t.done).length;
   const s = db.settings;
+  const sources = Object.entries(db.events.reduce((a, e) => { a[e.source] = (a[e.source] || 0) + 1; return a; }, {}));
   const setChip = (k, v, label) => `<button class="chip${+s[k] === v ? ' on' : ''}" data-a="setS" data-k="${k}" data-v="${v}">${label}</button>`;
   return `
     <button class="banner" data-a="go" data-v="review">🗓 <span class="grow"><b>Wochenrückblick</b><br><small>${s.lastReview ? `Zuletzt: ${dayLabel(s.lastReview)}` : 'Noch nie gemacht'}</small></span> ›</button>
@@ -483,6 +758,17 @@ function viewMore() {
       <button class="ghost block" data-a="newTpl">+ Neue Vorlage</button>
     </section>
 
+    <section class="sec"><div class="sec-h"><h3>Kalender</h3></div>
+      <p class="muted small hint">Deine Termine bestimmen, wie viel Zeit pro Tag für Aufgaben bleibt. Ganztägige Termine wie „Urlaub“ oder „Krank“ blockieren den Tag.</p>
+      <button class="block" data-a="pasteSheet">📱 Termine aus iPhone-Kalender übernehmen</button>
+      <button class="block" data-a="importIcs">📥 Kalender-Datei (.ics) importieren – Outlook, Google, Mac</button>
+      <button class="block" data-a="exportIcs">📤 Planer → Kalender (.ics): Deadlines, Zeitblöcke, eigene Termine</button>
+      <button class="ghost block" data-a="newEvent">+ Eigener Termin</button>
+      ${sources.length ? `<div class="srclist">${sources.map(([src, n]) => `<div class="row gap"><span class="grow">${esc(srcLabel(src))} <span class="muted small">· ${n} Termine</span></span>${src ? `<button class="ghost small-btn danger" data-a="dropSource" data-v="${esc(src)}">Entfernen</button>` : ''}</div>`).join('')}</div>` : ''}
+      <label class="lbl">Arbeitszeit (Rahmen für Zeitplan und freie Zeit)</label>
+      <div class="row gap"><input type="time" data-f="s.workStart" value="${s.workStart}"><span class="muted">bis</span><input type="time" data-f="s.workEnd" value="${s.workEnd}"></div>
+    </section>
+
     <section class="sec"><div class="sec-h"><h3>Projekte</h3></div>
       ${db.projects.map(p => card(p, stats(p.id))).join('')}
       ${none.all.length ? card(null, none) : ''}
@@ -490,7 +776,7 @@ function viewMore() {
     </section>
 
     <section class="sec"><div class="sec-h"><h3>Einstellungen</h3></div>
-      <label class="lbl">Tageskapazität – wie viel Aufgabenzeit du neben Meetings realistisch hast</label>
+      <label class="lbl">Max. Aufgabenzeit pro Tag (gilt zusätzlich zur freien Zeit nach Terminen)</label>
       <div class="chips">${[180, 240, 300, 360, 420, 480].map(v => setChip('capacity', v, fmtMin(v))).join('')}</div>
       <label class="lbl">Dauer einer Fokus-Session</label>
       <div class="chips">${[25, 45, 60, 90].map(v => setChip('focus', v, `${v} min`)).join('')}</div>
@@ -504,7 +790,6 @@ function viewMore() {
         <button class="grow" data-a="export">⬇︎ Backup</button>
         <button class="grow" data-a="import">⬆︎ Laden</button>
       </div>
-      <button class="block" data-a="exportIcs">📆 Deadlines als Kalender-Datei (.ics)</button>
       <button class="ghost block" data-a="clearDone"${doneCount ? '' : ' disabled'}>Erledigte löschen (${doneCount})</button>
     </section>
 
@@ -550,7 +835,7 @@ function viewReview() {
     ${step(5, 'Nächste Woche: Auslastung', `<div class="loadlist">${nextDays.map(d => {
       const m = sumEst(active().filter(t => t.plan === d));
       const dl = open().filter(t => t.due === d).length;
-      return `<div class="row gap"><span class="lday">${WD[parse(d).getDay()]} ${short(d)}</span>${capBar(m)}${dl ? `<span class="badge b-soon">⚑ ${dl}</span>` : ''}</div>`;
+      return `<div class="row gap"><span class="lday">${WD[parse(d).getDay()]} ${short(d)}</span>${blockedOn(d) ? '<span class="grow muted small">blockiert</span>' : capBar(m, capOn(d))}${dl ? `<span class="badge b-soon">⚑ ${dl}</span>` : ''}</div>`;
     }).join('')}</div>
       <button class="ghost block" data-a="goWeek" data-v="${next}">In der Wochenansicht planen ›</button>`)}
     ${noDue.length ? step(6, 'Ohne Termin: noch relevant?', `<p class="muted small hint">Streich, was nicht mehr wichtig ist. Gib dem Rest eine Deadline oder einen Plan-Tag.</p>${noDue.map(t => row(t)).join('')}`) : ''}
@@ -595,7 +880,10 @@ function sheetEdit(d) {
 
     ${waitingMode ? '' : `
     <label class="lbl">Eingeplant – wann arbeitest du daran?</label>
-    <input type="date" data-f="d.plan" value="${d.plan || ''}">
+    <div class="row gap">
+      <input class="grow" type="date" data-f="d.plan" value="${d.plan || ''}">
+      ${d.plan ? `<input type="time" data-f="d.planTime" value="${d.planTime || ''}" title="Uhrzeit (Zeitblock)" aria-label="Uhrzeit">` : ''}
+    </div>
     <div class="chips">${dateChips('plan', [['Heute', t0], ['Morgen', addDays(t0, 1)], ['Keiner', '']])}</div>`}
 
     <label class="lbl">Priorität</label>
@@ -638,11 +926,11 @@ function sheetPlan(t) {
     <div class="muted small">${esc(t.title)}${t.due ? ` · Deadline ${dayLabel(t.due)}${t.dueTime ? ' ' + t.dueTime : ''}` : ''}${t.est ? ` · ${fmtMin(t.est)}` : ''}</div>
     <div class="chips">${opts.map(day => {
       const load = sumEst(active().filter(x => x.plan === day && x.id !== t.id));
-      const full = load + (t.est || 0) > cap();
+      const full = load + (t.est || 0) > capOn(day);
       return `<button class="chip${t.plan === day ? ' on' : ''}${t.due && day > t.due ? ' late' : ''}${full ? ' full' : ''}" data-a="planTo" data-id="${t.id}" data-v="${day}">
-        ${day === nextMon && diff(t0, day) > 6 ? 'Nächste Woche' : dayLabel(day)}${load ? ` <small>· ${fmtMin(load)}</small>` : ''}</button>`;
+        ${day === nextMon && diff(t0, day) > 6 ? 'Nächste Woche' : dayLabel(day)} <small>· ${blockedOn(day) ? 'blockiert' : `${fmtMin(load) === '0 min' ? '' : fmtMin(load) + ' / '}${fmtMin(capOn(day))} frei`}</small></button>`;
     }).join('')}</div>
-    <p class="muted small hint">Rot umrandet: nach der Deadline. Gestrichelt: Der Tag wäre über deiner Kapazität.</p>
+    <p class="muted small hint">Je Tag: schon geplant / frei nach Terminen. Rot umrandet: nach der Deadline. Gestrichelt: Der Tag wäre zu voll.</p>
     <input type="date" data-f="uv.planPick" value="${t.plan || ''}">
     <button class="primary block" data-a="planTo" data-id="${t.id}" data-pick="1">Dieses Datum übernehmen</button>
     ${t.plan ? `<button class="ghost block" data-a="planTo" data-id="${t.id}" data-v="">Planung entfernen</button>` : ''}`);
@@ -693,6 +981,66 @@ function sheetApply(d) {
     <button class="primary block big" data-a="doApply"${d.deadline && steps.length ? '' : ' disabled'}>${steps.length} Aufgaben anlegen</button>`);
 }
 
+function sheetEvent(d) {
+  const isNew = !db.events.some(e => e.id === d.id);
+  const imported = !!d.source;
+  const yn = (k, on, labels) => `<div class="chips seg">${labels.map(([l, v]) => `<button class="chip${(!!d[k]) === v ? ' on' : ''}" data-a="setD" data-k="${k}" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>`;
+  return sheetWrap(isNew ? 'Neuer Termin' : 'Termin', `
+    ${imported ? `<p class="muted small hint">Importiert aus „${esc(srcLabel(d.source))}“. Änderungen hier werden beim nächsten Import überschrieben.</p>` : ''}
+    <input class="title-in" data-f="d.title" placeholder="z. B. Jour fixe, Arzt, Training, Urlaub" value="${esc(d.title)}" ${isNew ? 'autofocus' : ''} autocomplete="off">
+    ${yn('allDay', d.allDay, [['Mit Uhrzeit', false], ['Ganztägig', true]])}
+    <label class="lbl">${d.allDay ? 'Von' : 'Datum'}</label>
+    <input type="date" data-f="d.date" value="${d.date || ''}">
+    ${d.allDay ? `
+      <label class="lbl">Bis (optional, für mehrere Tage)</label>
+      <input type="date" data-f="d.endDate" value="${d.endDate || ''}">
+      <label class="lbl">Blockiert den Tag für Aufgaben? (Urlaub, krank, Feiertag)</label>
+      ${yn('blocks', d.blocks, [['Nein', false], ['Ja, blockieren', true]])}` : `
+      <div class="row gap"><label class="lbl grow">Beginn</label><label class="lbl grow">Ende</label></div>
+      <div class="row gap"><input class="grow" type="time" data-f="d.start" value="${d.start || ''}"><input class="grow" type="time" data-f="d.end" value="${d.end || ''}"></div>`}
+    ${imported ? '' : `<label class="lbl">Wiederholen</label>
+      <select data-f="d.repeat">${Object.entries(EV_REPEATS).map(([v, l]) => `<option value="${v}"${d.repeat === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`}
+    <label class="lbl">Ort (optional)</label>
+    <input data-f="d.location" value="${esc(d.location)}" autocomplete="off">
+    <textarea data-f="d.notes" rows="2" placeholder="Notizen (optional)">${esc(d.notes)}</textarea>
+    <button class="primary block big" data-a="saveEvent">Speichern</button>
+    ${isNew ? '' : '<button class="ghost block danger" data-a="deleteEvent">Termin löschen</button>'}`);
+}
+
+function sheetPaste(d) {
+  const n = d.text ? (d.text.includes('BEGIN:VCALENDAR') ? icsToEvents(parseIcs(d.text), 'iphone') : parseShortcut(d.text)).length : 0;
+  return sheetWrap('Termine aus dem iPhone-Kalender', `
+    <p class="small hint">Eine Web-App darf den iPhone-Kalender nicht direkt lesen. Ein <b>Kurzbefehl</b> kopiert deine Termine, und du fügst sie hier ein. Einmal einrichten, danach dauert es zwei Fingertipps.</p>
+    <details class="howto"${n ? '' : ' open'}><summary>Kurzbefehl einrichten (einmalig, ca. 3 Minuten)</summary>
+      <ol class="small">
+        <li>App <b>Kurzbefehle</b> öffnen → <b>+</b> → Name: <i>Planer-Kalender</i>.</li>
+        <li>Aktion <b>Kalenderereignisse suchen</b> hinzufügen. Filter: <i>Startdatum</i> → <i>ist in den nächsten</i> → <i>14 Tage</i>. Optional mit <i>Kalender ist …</i> einschränken.</li>
+        <li>Aktion <b>Wiederholen mit jedem</b> (Eingabe: Kalenderereignisse).</li>
+        <li>Darin <b>Datum formatieren</b>: Eingabe <i>Wiederholungsobjekt → Startdatum</i>, Format <i>ISO 8601</i>, <i>Zeit einschließen</i> an.</li>
+        <li>Darin noch einmal <b>Datum formatieren</b> mit <i>Wiederholungsobjekt → Enddatum</i> (gleiche Einstellungen).</li>
+        <li>Darin Aktion <b>Text</b> mit genau dieser Zeile (Variablen über die Leiste einfügen):<br>
+          <code>Formatiertes Datum | Formatiertes Datum 2 | Titel | Kalender | Ganztägig</code><br>
+          Titel, Kalender und Ganztägig sind Eigenschaften von <i>Wiederholungsobjekt</i>.</li>
+        <li>Nach <i>Ende der Wiederholung</i>: <b>Text kombinieren</b> mit <i>Neue Zeilen</i>.</li>
+        <li><b>In Zwischenablage kopieren</b>.</li>
+      </ol>
+      <p class="muted small">Danach: Kurzbefehl ausführen (auch per Siri oder Widget), Planer öffnen → Mehr → hier → „Aus Zwischenablage einfügen“.<br>
+      Hinweis: Die Namen der Aktionen können je nach iOS-Version leicht abweichen.</p>
+    </details>
+    <button class="block" data-a="pasteClip">📋 Aus Zwischenablage einfügen</button>
+    <textarea data-f="d.text" rows="5" class="mono" placeholder="…oder hier einfügen. Erwartet pro Zeile: Start | Ende | Titel | Kalender | Ganztägig. Ein .ics-Text geht auch.">${esc(d.text || '')}</textarea>
+    <p class="muted small hint">${d.text ? `${n} Termine erkannt.` : ''} Bisher übernommene iPhone-Termine werden dabei ersetzt.</p>
+    <button class="primary block big" data-a="doPaste"${n ? '' : ' disabled'}>${n ? `${n} Termine übernehmen` : 'Übernehmen'}</button>`);
+}
+
+function sheetChoose(day) {
+  return sheetWrap(`${WDL[parse(day).getDay()]}, ${short(day)}`, `
+    <div class="row gap">
+      <button class="primary grow big" data-a="new" data-plan="${day}">+ Aufgabe</button>
+      <button class="grow big" data-a="newEvent" data-v="${day}">+ Termin</button>
+    </div>`);
+}
+
 function sheetConfirm(s) {
   return `<div class="sheet-backdrop" data-a="close"></div>
   <div class="sheet confirm"><div class="sheet-head"><b>${esc(s.text)}</b></div>
@@ -710,6 +1058,7 @@ function render() {
   const sheet = !s ? '' : {
     edit: () => sheetEdit(s.draft), plan: () => sheetPlan(task(s.id)), project: () => sheetProject(s.draft),
     template: () => sheetTemplate(s.draft), apply: () => sheetApply(s.draft), confirm: () => sheetConfirm(s),
+    event: () => sheetEvent(s.draft), paste: () => sheetPaste(s.draft), choose: () => sheetChoose(s.day),
   }[s.type]();
   const t0 = today();
   const badge = {
@@ -721,7 +1070,7 @@ function render() {
   $app.innerHTML = `
     <header class="top"><div class="wrap row gap">
       ${ui.view === 'review' ? '<button class="icon-btn" data-a="go" data-v="more" aria-label="Zurück">‹</button>' : ''}
-      <h1 class="grow">${VIEWS[ui.view]}</h1>
+      <h1 class="grow">${ui.view === 'today' && ui.todayMode === 'timeline' && ui.day !== today() ? dayLabel(ui.day) : VIEWS[ui.view]}</h1>
       ${ui.view === 'review' ? '' : '<button class="primary new-btn" data-a="new">+ Aufgabe</button>'}</div></header>
     <main class="wrap">${body}</main>
     <nav class="tabs">${Object.entries(TABS).map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-a="go" data-v="${k}">
@@ -801,6 +1150,7 @@ function saveDraft() {
   d.due = d.due || null; d.plan = d.plan || null; d.followUp = d.followUp || null; d.est = +d.est || 0;
   if (!d.due) d.dueTime = '';
   if (d.status === 'waiting') { d.plan = null; d.waitingFor = d.waitingFor.trim(); } else d.followUp = null;
+  if (!d.plan) d.planTime = '';
   d.subs = d.subs.filter(s => s.t.trim());
   const i = db.tasks.findIndex(t => t.id === d.id);
   if (i >= 0) db.tasks[i] = d; else db.tasks.push(d);
@@ -810,25 +1160,92 @@ function saveDraft() {
 
 function exportIcs() {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  const e = s => String(s).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\r?\n/g, '\\n');
-  const list = open().filter(t => t.due);
-  if (!list.length) { toast('Keine offenen Deadlines zum Exportieren'); return; }
-  const events = list.map(t => {
-    const d = t.due.replace(/-/g, '');
-    const when = t.dueTime
-      ? `DTSTART:${d}T${t.dueTime.replace(':', '')}00\r\nDURATION:PT30M`
-      : `DTSTART;VALUE=DATE:${d}\r\nDTEND;VALUE=DATE:${addDays(t.due, 1).replace(/-/g, '')}`;
+  const e = x => String(x).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\r?\n/g, '\\n');
+  const dt = (date, time) => `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
+  const ev = (id, summary, when, desc, extra = '') =>
+    `BEGIN:VEVENT\r\nUID:${id}@planer\r\nDTSTAMP:${stamp}\r\n${when}\r\nSUMMARY:${e(summary)}\r\n${desc ? `DESCRIPTION:${e(desc)}\r\n` : ''}${extra}END:VEVENT`;
+  const allDay = (from, to) => `DTSTART;VALUE=DATE:${from.replace(/-/g, '')}\r\nDTEND;VALUE=DATE:${addDays(to, 1).replace(/-/g, '')}`;
+  const out = [];
+  open().filter(t => t.due).forEach(t => {
     const p = proj(t.project);
     const desc = [p && `Projekt: ${p.name}`, t.status === 'waiting' && `Warten auf: ${t.waitingFor}`, t.notes].filter(Boolean).join('\n');
-    return `BEGIN:VEVENT\r\nUID:${t.id}@planer\r\nDTSTAMP:${stamp}\r\n${when}\r\nSUMMARY:${e('⚑ ' + t.title)}\r\n${desc ? `DESCRIPTION:${e(desc)}\r\n` : ''}TRANSP:TRANSPARENT\r\nEND:VEVENT`;
+    out.push(ev(`${t.id}-due`, `⚑ ${t.title}`, t.dueTime ? `DTSTART:${dt(t.due, t.dueTime)}\r\nDURATION:PT30M` : allDay(t.due, t.due), desc, 'TRANSP:TRANSPARENT\r\n'));
   });
-  download(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Planer//DE\r\nCALSCALE:GREGORIAN\r\n${events.join('\r\n')}\r\nEND:VCALENDAR\r\n`, `planer-deadlines-${today()}.ics`, 'text/calendar');
-  toast(`${list.length} Deadlines exportiert – Datei im Kalender öffnen`);
+  active().filter(t => t.plan && t.planTime && t.plan >= today()).forEach(t => {
+    out.push(ev(`${t.id}-block`, `▶ ${t.title}`, `DTSTART:${dt(t.plan, t.planTime)}\r\nDURATION:PT${t.est || 30}M`, t.notes));
+  });
+  const RR = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' };
+  db.events.filter(x => !x.source).forEach(x => {
+    const when = x.allDay ? allDay(x.date, x.endDate || x.date) : `DTSTART:${dt(x.date, x.start)}\r\nDTEND:${dt(x.endDate || x.date, x.end || fromMin(Math.min(1439, toMin(x.start) + 60)))}`;
+    out.push(ev(x.id, x.title, when, x.notes, `${x.location ? `LOCATION:${e(x.location)}\r\n` : ''}${x.repeat ? `RRULE:${RR[x.repeat]}\r\n` : ''}`));
+  });
+  if (!out.length) { toast('Nichts zum Exportieren'); return; }
+  download(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Planer//DE\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Planer\r\n${out.join('\r\n')}\r\nEND:VCALENDAR\r\n`, `planer-${today()}.ics`, 'text/calendar');
+  toast(`${out.length} Einträge exportiert – Datei im Kalender öffnen`);
 }
 
 const actions = {
   go: ({ v }) => { ui.view = v; history.replaceState(null, '', `#/${v}`); window.scrollTo(0, 0); },
   goWeek: ({ v }) => { ui.weekStart = v; actions.go({ v: 'week' }); },
+  todayTimeline: () => { ui.todayMode = 'timeline'; ui.day = today(); },
+  day: ({ v }) => { ui.day = +v ? addDays(ui.day, +v) : today(); },
+  openDay: ({ v }) => { ui.todayMode = 'timeline'; ui.day = v; actions.go({ v: 'today' }); },
+  choose: ({ v }) => { ui.sheet = { type: 'choose', day: v }; },
+  newEvent: ({ v }) => {
+    const [ws] = work(); const st = Math.max(ws, Math.ceil(nowMin() / 30) * 30);
+    const date = v || today();
+    const start = date === today() && st < 1380 ? fromMin(st) : fromMin(Math.max(ws, 9 * 60));
+    ui.sheet = { type: 'event', draft: { id: uid(), title: '', date, endDate: null, start, end: fromMin(Math.min(1439, toMin(start) + 60)), allDay: false, blocks: false, repeat: '', location: '', notes: '', source: '', uid: '' } };
+  },
+  editEvent: ({ id }) => { ui.sheet = { type: 'event', draft: structuredClone(db.events.find(e => e.id === id)) }; },
+  saveEvent: () => {
+    const d = ui.sheet.draft;
+    d.title = d.title.trim();
+    if (!d.title) { toast('Bitte einen Titel eingeben'); ui.focus = 'd.title'; return; }
+    if (!d.date) { toast('Bitte ein Datum wählen'); return; }
+    if (d.allDay) { d.start = ''; d.end = ''; if (!d.endDate || d.endDate <= d.date) d.endDate = null; }
+    else {
+      if (!d.start) { toast('Bitte eine Startzeit eingeben'); return; }
+      if (!d.end || toMin(d.end) <= toMin(d.start)) d.end = fromMin(Math.min(1439, toMin(d.start) + 60));
+      d.endDate = null; d.blocks = false;
+    }
+    const i = db.events.findIndex(e => e.id === d.id);
+    if (i >= 0) db.events[i] = d; else db.events.push(d);
+    save(); ui.sheet = null; toast(i >= 0 ? 'Termin gespeichert' : 'Termin angelegt');
+  },
+  deleteEvent: () => {
+    const id = ui.sheet.draft.id;
+    ui.sheet = { type: 'confirm', text: 'Termin löschen?', yes: 'Löschen', run: () => {
+      snap(); db.events = db.events.filter(e => e.id !== id); save(); toast('Termin gelöscht', true);
+    } };
+  },
+  autoPlan: () => {
+    snap();
+    const { placed, left } = autoPlan(ui.day);
+    save();
+    toast(left.length ? `${placed} eingeplant, ${left.length} ${left.length === 1 ? 'passt' : 'passen'} heute nicht mehr rein` : `${placed} Aufgabe${placed === 1 ? '' : 'n'} in freie Zeit gelegt`, true);
+  },
+  clearTimes: ({ v }) => { snap(); db.tasks.forEach(t => { if (t.plan === v && !t.done) t.planTime = ''; }); save(); toast('Zeitblöcke entfernt', true); },
+  pasteSheet: () => { ui.sheet = { type: 'paste', draft: { text: '' } }; },
+  pasteClip: async () => {
+    try {
+      const txt = await navigator.clipboard.readText();
+      if (ui.sheet?.type === 'paste') { ui.sheet.draft.text = txt; render(); }
+      if (!txt) toast('Zwischenablage ist leer');
+    } catch { toast('Kein Zugriff auf die Zwischenablage – bitte ins Feld einfügen'); ui.focus = 'd.text'; render(); }
+  },
+  doPaste: () => {
+    const txt = ui.sheet.draft.text || '';
+    const list = txt.includes('BEGIN:VCALENDAR') ? icsToEvents(parseIcs(txt), 'iphone') : parseShortcut(txt);
+    if (!list.length) { toast('Keine Termine erkannt'); return; }
+    ui.sheet = null; importEvents(list, 'iphone');
+  },
+  importIcs: () => document.getElementById('icsFile').click(),
+  dropSource: ({ v }) => {
+    ui.sheet = { type: 'confirm', text: `Alle Termine aus „${srcLabel(v)}“ entfernen?`, yes: 'Entfernen', run: () => {
+      snap(); db.events = db.events.filter(e => e.source !== v); save(); toast('Entfernt', true);
+    } };
+  },
   new: ({ plan }) => { ui.newSub = ''; ui.sheet = { type: 'edit', draft: newDraft(plan ? { plan } : {}) }; },
   edit: ({ id }) => { ui.newSub = ''; ui.sheet = { type: 'edit', draft: structuredClone(task(id)) }; },
   close: () => { ui.sheet = null; },
@@ -839,7 +1256,8 @@ const actions = {
   setS: ({ k, v }) => { db.settings[k] = k === 'skipWeekend' ? v === '1' : +v; save(); },
   setD: ({ k, v, num }) => {
     const d = ui.sheet.draft;
-    d[k] = num ? +v : (v === '' && ['due', 'plan', 'followUp'].includes(k) ? null : v);
+    d[k] = ['allDay', 'blocks'].includes(k) ? v === '1' : num ? +v : (v === '' && ['due', 'plan', 'followUp'].includes(k) ? null : v);
+    if (k === 'plan') d.planTime = '';
     if (k === 'due' && !v) d.dueTime = '';
     if (k === 'status' && v === 'waiting' && !d.followUp) d.followUp = addDays(today(), 3);
     if (k === 'tpl') { const tp = db.templates.find(x => x.id === v); if (tp) { d.project = tp.project; if (!d.titleTouched) d.title = tp.name; } }
@@ -879,7 +1297,8 @@ const actions = {
   planTo: ({ id, v, pick }) => {
     const val = pick ? ui.planPick : v;
     if (pick && !val) { toast('Bitte ein Datum wählen'); return; }
-    task(id).plan = val || null; save(); ui.sheet = null;
+    const t = task(id); if (t.plan !== (val || null)) t.planTime = '';
+    t.plan = val || null; save(); ui.sheet = null;
     toast(val ? `Eingeplant: ${dayLabel(val)}` : 'Planung entfernt');
   },
   reviewDone: () => { db.settings.lastReview = today(); save(); toast('Rückblick erledigt 🎉'); actions.go({ v: 'today' }); },
@@ -974,10 +1393,13 @@ function onField(e) {
   const v = el.value;
   if (scope === 'ui') { ui[name] = v; if (!quiet) render(); }
   else if (scope === 'uv') ui[name] = v;
+  else if (scope === 's') { if (v) { db.settings[name] = v; save(); } if (!quiet) render(); }
   else if (scope === 'd') {
     ui.sheet.draft[name] = v;
     if (ui.sheet.type === 'apply' && name === 'title') ui.sheet.draft.titleTouched = true;
-    if (RERENDER_D.includes(name) && !quiet) render();
+    if (name === 'plan' && ui.sheet.type === 'edit') { ui.sheet.draft.planTime = ''; }
+    if ((RERENDER_D.includes(name) && !quiet) || (ui.sheet.type === 'paste' && name === 'text' && e.type === 'input' && v.length - (ui.lastPasteLen || 0) > 20)) render();
+    if (ui.sheet?.type === 'paste') ui.lastPasteLen = v.length;
   } else if (scope === 'sub') { const s = ui.sheet.draft.subs.find(x => x.id === name); if (s) s.t = v; }
 }
 $app.addEventListener('input', onField);
@@ -1007,6 +1429,18 @@ document.getElementById('importFile').addEventListener('change', e => {
     ui.sheet = { type: 'confirm', text: `Backup mit ${data.tasks.length} Aufgaben laden? Die aktuellen Daten werden ersetzt.`, yes: 'Laden', run: () => {
       snap(); db = data; save(); toast('Backup geladen', true);
     } };
+    render();
+  });
+});
+
+document.getElementById('icsFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  file.text().then(txt => {
+    const list = icsToEvents(parseIcs(txt), 'ics:' + file.name.replace(/\.ics$/i, ''));
+    if (!list.length) { toast('Keine Termine in der Datei gefunden'); return; }
+    importEvents(list, 'ics:' + file.name.replace(/\.ics$/i, ''));
     render();
   });
 });
