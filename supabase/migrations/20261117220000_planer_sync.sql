@@ -18,7 +18,6 @@ begin
   new.updated_at := now();
   return new;
 end $$;
-drop trigger if exists planer_items_touch on public.planer_items;
 create trigger planer_items_touch before insert or update on public.planer_items
   for each row execute function public.planer_touch();
 
