@@ -1,13 +1,18 @@
-// Service Worker des Planers: cacht alle Dateien, danach läuft der Planer ohne Internet.
-// Bei Änderungen VERSION erhöhen, damit Geräte die neue Fassung laden.
-const VERSION = 'planer-v7';
+// Service Worker des Planers.
+// Mit Internet: immer die aktuelle Fassung vom Server (Updates kommen sofort an).
+// Ohne Internet: die zuletzt gespeicherte Fassung aus dem Cache.
+// Bei Änderungen VERSION erhöhen.
+const VERSION = 'planer-v8';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'style.css', 'app.js', 'icons.js', 'sync.js', 'config.js', 'vendor/supabase.js',
   'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'favicon.svg',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' umgeht den Browser-Zwischenspeicher, damit keine alten Dateien in den neuen Cache geraten.
+  e.waitUntil(caches.open(VERSION)
+    .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -17,15 +22,17 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  if (new URL(e.request.url).origin !== location.origin) return; // Sync-Anfragen (Supabase) nie aus dem Cache
-  e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request).then(res => {
-      if (res.ok && new URL(e.request.url).origin === location.origin) {
-        const copy = res.clone();
-        caches.open(VERSION).then(c => c.put(e.request, copy));
-      }
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== location.origin) return; // Sync-Anfragen (Supabase) nie über den Cache
+  e.respondWith((async () => {
+    try {
+      // Neue Anfrage statt req weiterzureichen: Seitenaufrufe (mode 'navigate') erlauben keine geänderten Optionen.
+      const res = await fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }));
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
-    }).catch(() => caches.match('index.html')))
-  );
+    } catch {
+      return (await caches.match(req, { ignoreSearch: true })) || (await caches.match('index.html')) || Response.error();
+    }
+  })());
 });
