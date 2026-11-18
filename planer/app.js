@@ -2,6 +2,7 @@
 // Vorlagen mit Rückwärtsplanung, Eisenhower-Matrix, Wochenrückblick, Kalender mit Terminen,
 // Zeitplan (Time-Blocking) und Import aus iPhone-/Outlook-Kalender.
 // Alles bleibt lokal im Browser (localStorage).
+import { ic } from './icons.js';
 import { sync, initSync, localChanged, syncNow, signIn, signUp, signOut, createFeed } from './sync.js';
 
 const KEY = 'planer.v1';
@@ -445,7 +446,7 @@ function tickTimer() {
   if (left <= 0) {
     const { t, mins } = stopTimer();
     alarm('Fokus-Session fertig', t ? `+${mins} min auf „${t.title}“ – kurze Pause!` : 'Kurze Pause!');
-    toast(`Fokus-Session fertig: +${mins} min${t ? ` auf „${t.title}“` : ''}. Pause! ☕`);
+    toast(`Fokus-Session fertig: +${mins} min${t ? ` auf „${t.title}“` : ''}. Zeit für eine Pause.`);
     render();
     return;
   }
@@ -472,7 +473,7 @@ function dueBadge(t) {
   else if (n === 1) { cls = 'b-soon'; txt = `Morgen${time}`; }
   else if (n < 7) { cls = 'b-soon'; txt = `${WD[parse(t.due).getDay()]}${time} · in ${n} Tagen`; }
   else txt = `${short(t.due)}${time}`;
-  return `<span class="badge ${cls}" title="Deadline">⚑ ${txt}</span>`;
+  return `<span class="badge ${cls}" title="Deadline">${ic('flag')}${txt}</span>`;
 }
 
 function row(t, o = {}) {
@@ -482,52 +483,54 @@ function row(t, o = {}) {
   if (p && !o.hideProject) meta.push(`<span class="pname"><i class="pdot" style="--c:${p.color}"></i>${esc(p.name)}</span>`);
   if (t.status === 'waiting' && !t.done) {
     const late = t.followUp && t.followUp <= today();
-    meta.push(`<span class="badge b-wait">⏳ ${esc(t.waitingFor || 'Warten')}${t.followUp ? ` · nachfassen ${dayLabel(t.followUp)}` : ''}</span>`);
+    meta.push(`<span class="badge b-wait">${ic('hourglass')}${esc(t.waitingFor || 'Warten')}${t.followUp ? ` · nachfassen ${dayLabel(t.followUp)}` : ''}</span>`);
     if (late) meta.push('<span class="badge b-over">nachhaken!</span>');
   }
   meta.push(dueBadge(t));
   if (t.plan && !o.hidePlan && !t.done && t.status !== 'waiting') {
-    meta.push(`<span class="badge b-plan">📅 ${t.plan < today() ? 'seit ' : ''}${dayLabel(t.plan)}${t.planTime ? ` ${t.planTime}` : ''}</span>`);
+    meta.push(`<span class="badge b-plan">${ic('calendar')}${t.plan < today() ? 'seit ' : ''}${dayLabel(t.plan)}${t.planTime ? ` ${t.planTime}` : ''}</span>`);
   } else if (t.planTime && o.hidePlan && !t.done) {
-    meta.push(`<span class="badge b-plan">🕘 ${t.planTime}</span>`);
+    meta.push(`<span class="badge b-plan">${ic('clock')}${t.planTime}</span>`);
   }
   if (!t.done && t.plan && t.due && t.plan > t.due) meta.push('<span class="badge b-over">nach Deadline!</span>');
-  if (t.subs.length) meta.push(`<span>☑ ${subsDone}/${t.subs.length}</span>`);
+  if (t.subs.length) meta.push(`<span class="mi">${ic('checklist')}${subsDone}/${t.subs.length}</span>`);
   if (t.est || t.spent) {
     const over = t.est && t.spent > t.est;
-    meta.push(`<span class="${over ? 'warn' : ''}">⏱ ${t.spent ? `${fmtMin(t.spent)}${t.est ? ' / ' : ''}` : ''}${t.est ? fmtMin(t.est) : ''}</span>`);
+    meta.push(`<span class="mi${over ? ' warn' : ''}">${ic('timer')}${t.spent ? `${fmtMin(t.spent)}${t.est ? ' / ' : ''}` : ''}${t.est ? fmtMin(t.est) : ''}</span>`);
   }
-  if (t.repeat) meta.push(`<span title="${REPEATS[t.repeat]}">↻</span>`);
-  if (t.notes) meta.push('<span>📝</span>');
+  if (t.repeat) meta.push(`<span class="mi" title="${REPEATS[t.repeat]}">${ic('repeat')}</span>`);
+  if (t.notes) meta.push(`<span class="mi" title="Notiz">${ic('note')}</span>`);
   const running = timer && timer.id === t.id;
   let btns = '';
   if (!t.done) {
-    if (o.unwait && t.status === 'waiting') btns += `<button class="icon-btn small" data-a="unwait" data-id="${t.id}" title="Ist da – wieder aktiv" aria-label="Wieder aktiv">↩</button>`;
+    if (o.unwait && t.status === 'waiting') btns += `<button class="icon-btn small" data-a="unwait" data-id="${t.id}" title="Ist da – wieder aktiv" aria-label="Wieder aktiv">${ic('undo')}</button>`;
     else {
-      if (o.focus) btns += `<button class="icon-btn small${running ? ' on' : ''}" data-a="${running ? 'timerStop' : 'focus'}" data-id="${t.id}" title="Fokus-Timer" aria-label="Fokus-Timer">${running ? '■' : '▶'}</button>`;
-      if (t.status !== 'waiting') btns += `<button class="icon-btn small" data-a="planSheet" data-id="${t.id}" title="Einplanen" aria-label="Einplanen">📅</button>`;
+      if (o.focus) btns += `<button class="icon-btn small${running ? ' on' : ''}" data-a="${running ? 'timerStop' : 'focus'}" data-id="${t.id}" title="Fokus-Timer" aria-label="Fokus-Timer">${ic(running ? 'stop' : 'play')}</button>`;
+      if (t.status !== 'waiting') btns += `<button class="icon-btn small" data-a="planSheet" data-id="${t.id}" title="Einplanen" aria-label="Einplanen">${ic('calendar')}</button>`;
     }
   }
-  return `<div class="task prio${t.prio}${t.done ? ' done' : ''}${running ? ' running' : ''}">
-    <button class="check" data-a="toggle" data-id="${t.id}" aria-label="Erledigt">${t.done ? '✓' : ''}</button>
+  return `<div class="swipe" data-id="${t.id}"><div class="swipe-bg"><span class="sw-l">${ic('check')}${t.done ? 'Offen' : 'Erledigt'}</span><span class="sw-r">Morgen${ic('arrowR')}</span></div>
+  <div class="task prio${t.prio}${t.done ? ' done' : ''}${running ? ' running' : ''}">
+    <button class="check" data-a="toggle" data-id="${t.id}" aria-label="Erledigt">${ic('check')}</button>
     <button class="tmain plain" data-a="edit" data-id="${t.id}">
       <span class="ttitle">${esc(t.title)}</span>
       <span class="tmeta">${meta.filter(Boolean).join('')}</span>
     </button>${btns}
-  </div>`;
+  </div></div>`;
 }
+const rows = (list, o = {}) => list.length ? `<div class="list">${list.map(t => row(t, o)).join('')}</div>` : '';
 
 const section = (title, list, o = {}) => !list.length && !o.always ? '' : `
   <section class="sec${o.cls ? ' ' + o.cls : ''}">
     <div class="sec-h"><h3>${title}</h3><span class="muted small">${o.extra ?? list.length}</span></div>
     ${o.hint ? `<p class="muted small hint">${o.hint}</p>` : ''}
-    ${list.length ? list.map(t => row(t, o)).join('') : `<div class="empty small">${o.empty || 'Nichts.'}</div>`}
+    ${list.length ? rows(list, o) : `<div class="empty small">${o.empty || 'Nichts.'}</div>`}
   </section>`;
 
 const quickInput = placeholder => `
-  <div class="quick row gap">
+  <div class="quick row gap">${ic('plus', 'qi')}
     <input class="grow" data-f="uv.quick" data-enter="quickAdd" placeholder="${placeholder}" value="${esc(ui.quick)}" enterkeyhint="done" autocomplete="off">
-    <button class="primary" data-a="quickAdd" aria-label="Hinzufügen">+</button>
+    <button class="primary" data-a="quickAdd" aria-label="Hinzufügen">${ic('arrowR')}</button>
   </div>`;
 
 const capBar = (mins, c = cap()) => {
@@ -538,7 +541,7 @@ const capBar = (mins, c = cap()) => {
 // ---------- Ansichten ----------
 const evTime = e => e.allDay ? (e.blocks ? 'blockiert' : 'ganztägig') : `${fromMin(e.s)}–${fromMin(Math.min(e.en, 1439))}`;
 const evRow = e => `<button class="ev plain${e.blocks ? ' blocks' : ''}" data-a="editEvent" data-id="${e.id}"><span class="evt">${evTime(e)}</span><span class="grow">${esc(e.title)}${e.location ? ` <span class="muted">· ${esc(e.location)}</span>` : ''}</span></button>`;
-const modeSwitch = () => `<div class="chips seg"><button class="chip${ui.todayMode === 'list' ? ' on' : ''}" data-a="set" data-k="todayMode" data-v="list">☰ Liste</button><button class="chip${ui.todayMode === 'timeline' ? ' on' : ''}" data-a="todayTimeline">🕘 Zeitplan</button></div>`;
+const modeSwitch = () => `<div class="chips seg"><button class="chip${ui.todayMode === 'list' ? ' on' : ''}" data-a="set" data-k="todayMode" data-v="list">${ic('list')}Liste</button><button class="chip${ui.todayMode === 'timeline' ? ' on' : ''}" data-a="todayTimeline">${ic('clock')}Zeitplan</button></div>`;
 
 function viewTimeline() {
   const t0 = today(), day = ui.day;
@@ -564,28 +567,29 @@ function viewTimeline() {
   const now = day === t0 ? nowMin() : -1;
   return `
     <div class="weeknav row gap">
-      <button class="icon-btn" data-a="day" data-v="-1" aria-label="Vorheriger Tag">‹</button>
+      <button class="icon-btn" data-a="day" data-v="-1" aria-label="Vorheriger Tag">${ic('chevL')}</button>
       <div class="grow center"><b>${WDL[parse(day).getDay()]}, ${short(day)}</b><div class="muted small">${blockedOn(day) ? 'Tag blockiert' : `Termine ${fmtMin(meetingMin(day)) || '–'} · frei ${fmtMin(free)}${blockedMin ? ` · Aufgaben ${fmtMin(blockedMin)}` : ''}`}</div></div>
-      <button class="icon-btn" data-a="day" data-v="1" aria-label="Nächster Tag">›</button>
+      <button class="icon-btn" data-a="day" data-v="1" aria-label="Nächster Tag">${ic('chevR')}</button>
     </div>
     ${day !== t0 ? '<button class="ghost block" data-a="day" data-v="0">Zu heute</button>' : ''}
     <div class="row gap tl-actions">
-      <button class="primary grow" data-a="autoPlan"${unsched.length ? '' : ' disabled'}>⚡ ${unsched.length} Aufgabe${unsched.length === 1 ? '' : 'n'} in freie Zeit legen</button>
-      <button data-a="newEvent" data-v="${day}">+ Termin</button>
+      <button class="primary grow" data-a="autoPlan"${unsched.length ? '' : ' disabled'}>${ic('bolt')}Auto-Planen${unsched.length ? ` · ${unsched.length}` : ''}</button>
+      <button data-a="newEvent" data-v="${day}">${ic('plus')}Termin</button>
     </div>
     ${allDay.length ? `<div class="allday">${allDay.map(evRow).join('')}</div>` : ''}
     <div class="timeline" style="height:${(to - from) * PX}px">
       ${hours.map(m => `<div class="hr" style="top:${(m - from) * PX}px"><span>${pad(m / 60)}:00</span></div>`).join('')}
       <div class="work" style="top:${(ws - from) * PX}px;height:${(we - ws) * PX}px"></div>
-      ${items.map(i => `<button class="blk ${i.kind}${i.done ? ' done' : ''}${i.kind === 'task' ? ' prio' + i.prio : ''}" data-a="${i.kind === 'ev' ? 'editEvent' : 'edit'}" data-id="${i.id}"
+      ${items.map(i => `<button class="blk ${i.kind === 'ev' ? 'evb' : 'task'}${i.done ? ' done' : ''}${i.kind === 'task' ? ' prio' + i.prio : ''}" data-a="${i.kind === 'ev' ? 'editEvent' : 'edit'}" data-id="${i.id}"
         style="top:${(i.s - from) * PX}px;height:${Math.max(20, (i.en - i.s) * PX - 2)}px;left:calc(46px + (100% - 50px) * ${i.lane} / ${i.lanes});width:calc((100% - 50px) / ${i.lanes} - 3px)">
         <b>${esc(i.title)}</b><small>${fromMin(i.s)}–${fromMin(Math.min(i.en, 1439))}${i.sub ? ' · ' + esc(i.sub) : ''}</small></button>`).join('')}
       ${now >= from && now <= to ? `<div class="now" style="top:${(now - from) * PX}px"></div>` : ''}
     </div>
     ${items.some(i => i.kind === 'task') ? `<button class="ghost block" data-a="clearTimes" data-v="${day}">Zeitblöcke dieses Tages entfernen</button>` : ''}
-    ${section('Noch ohne Uhrzeit', unsched, { focus: true, hint: 'Mit ⚡ füllt der Planer die Lücken zwischen deinen Terminen, wichtige Aufgaben zuerst. Eine feste Uhrzeit setzt du in der Aufgabe.' })}`;
+    ${section('Noch ohne Uhrzeit', unsched, { focus: true, hint: 'Auto-Planen füllt die Lücken zwischen deinen Terminen, wichtige Aufgaben zuerst. Eine feste Uhrzeit setzt du in der Aufgabe.' })}`;
 }
 
+const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Gute Nacht' : h < 11 ? 'Guten Morgen' : h < 17 ? 'Hallo' : h < 22 ? 'Guten Abend' : 'Gute Nacht'; };
 function viewToday() {
   if (ui.todayMode === 'timeline') return modeSwitch() + viewTimeline();
   const t0 = today();
@@ -603,29 +607,30 @@ function viewToday() {
   const evs = eventsOn(t0).filter(e => e.allDay || e.en > nowMin());
   const nextEv = evs.find(e => !e.allDay && e.s >= nowMin());
   return `
-    ${reviewDue ? '<button class="banner" data-a="go" data-v="review">🗓 <span class="grow"><b>Wochenrückblick fällig</b><br><small>15 Minuten: aufräumen, neu planen, nächste Woche vorbereiten</small></span> ›</button>' : ''}
-    <div class="hero">
-      <div class="muted small">${WDL[d.getDay()]}, ${d.getDate()}. ${MON[d.getMonth()]} ${d.getFullYear()} · KW ${isoWeek(t0)}</div>
-      <div class="stats">
-        <div><b>${planned.length}</b><span>offen heute</span></div>
-        <div><b class="${overdue.length ? 'bad' : ''}">${overdue.length}</b><span>überfällig</span></div>
-        <div><b class="good">${doneToday.length}</b><span>erledigt</span></div>
-        <div><b class="${est > capOn(t0) ? 'warn' : ''}">${est ? fmtMin(est) : '–'}</b><span>Aufwand / ${fmtMin(capOn(t0))} frei</span></div>
+    <div class="hero today-hero">
+      <div class="ring" style="--p:${pct}"><span>${planned.length + doneToday.length ? pct + '%' : ic('check')}</span></div>
+      <div class="grow">
+        <div class="greet">${greeting()}</div>
+        <div class="muted small">${planned.length ? `${planned.length} offen${est ? ` · ${fmtMin(est)} Aufwand` : ''}` : doneToday.length ? 'Alles für heute erledigt' : 'Noch nichts für heute geplant'}</div>
+        <div class="pills">
+          ${overdue.length ? `<span class="pill bad">${ic('flag')}${overdue.length} überfällig</span>` : ''}
+          <span class="pill${est > capOn(t0) ? ' warn' : ''}" title="${est > capOn(t0) ? 'Mehr geplant als frei – wisch Aufgaben nach links auf morgen' : 'Freie Zeit heute nach Terminen'}">${ic('clock')}${est > capOn(t0) ? `${fmtMin(est - capOn(t0))} zu viel` : `${fmtMin(capOn(t0))} frei`}</span>
+          ${doneToday.length ? `<span class="pill good">${ic('check')}${doneToday.length} erledigt</span>` : ''}
+        </div>
       </div>
-      <div class="bar"><i style="width:${pct}%"></i></div>
-      ${est > capOn(t0) ? `<p class="small warn hint">Mehr geplant, als heute frei ist (${fmtMin(capOn(t0))}${meetingMin(t0) ? ` nach ${fmtMin(meetingMin(t0))} Terminen` : ''}). Schieb etwas mit 📅 auf einen anderen Tag.</p>` : ''}
     </div>
     ${modeSwitch()}
     ${evs.length ? `<section class="sec"><div class="sec-h"><h3>Termine heute</h3><span class="muted small">${nextEv ? `nächster ${nextEv.s - nowMin() < 60 ? `in ${nextEv.s - nowMin()} min` : `um ${fromMin(nextEv.s)}`}` : ''}</span></div>${evs.map(evRow).join('')}</section>` : ''}
     ${quickInput('z. B. „Bericht bis fr ~2h #Arbeit !“')}
     ${section('Überfällig', overdue, { focus: true, cls: 'over' })}
-    ${section('Heute', todays, { focus: true, always: true, empty: overdue.length ? 'Erst das Überfällige 💪' : 'Nichts geplant. Hol dir etwas aus „Bald fällig“ oder plane in der Woche.' })}
+    ${section('Heute', todays, { focus: true, always: true, empty: overdue.length ? 'Erst das Überfällige.' : 'Nichts geplant. Hol dir etwas aus „Bald fällig“ oder plane in der Woche.' })}
     ${section('Nachfassen', follow, { unwait: true, hint: 'Du wartest auf jemanden – heute nachhaken.' })}
     ${section('Bald fällig – noch nicht eingeplant', soon)}
     ${doneToday.length ? `<section class="sec">
-      <button class="sec-h plain toggle" data-a="toggleDone"><h3>Heute erledigt</h3><span class="muted small">${doneToday.length} ${ui.showDone ? '▴' : '▾'}</span></button>
-      ${ui.showDone ? doneToday.map(t => row(t)).join('') : ''}
-    </section>` : ''}`;
+      <button class="sec-h plain toggle" data-a="toggleDone"><h3>Heute erledigt</h3><span class="muted small">${doneToday.length}${ic(ui.showDone ? 'chevU' : 'chevD')}</span></button>
+      ${ui.showDone ? rows(doneToday) : ''}
+    </section>` : ''}
+    ${reviewDue ? `<button class="banner" data-a="go" data-v="review"><span class="bi">${ic('sparkle')}</span><span class="grow"><b>Wochenrückblick fällig</b><small>15 Minuten: aufräumen, neu planen, vorbereiten</small></span>${ic('chevR', 'chev')}</button>` : ''}`;
 }
 
 function viewWeek() {
@@ -635,12 +640,12 @@ function viewWeek() {
   const weekEst = sumEst(active().filter(t => t.plan && t.plan >= days[0] && t.plan <= days[6]));
   return `
     <div class="weeknav row gap">
-      <button class="icon-btn" data-a="week" data-v="-7" aria-label="Vorige Woche">‹</button>
+      <button class="icon-btn" data-a="week" data-v="-7" aria-label="Vorige Woche">${ic('chevL')}</button>
       <div class="grow center"><b>KW ${isoWeek(ui.weekStart)}</b><div class="muted small">${short(days[0])} – ${short(days[6])}${weekEst ? ` · ${fmtMin(weekEst)} geplant` : ''}</div></div>
-      <button class="icon-btn" data-a="week" data-v="7" aria-label="Nächste Woche">›</button>
+      <button class="icon-btn" data-a="week" data-v="7" aria-label="Nächste Woche">${ic('chevR')}</button>
     </div>
     ${ui.weekStart !== mondayOf(t0) ? '<button class="ghost block" data-a="week" data-v="0">Zur aktuellen Woche</button>' : ''}
-    ${section('Noch nicht eingeplant', pool, { extra: `${pool.length}${sumEst(pool) ? ` · ${fmtMin(sumEst(pool))}` : ''}`, hint: 'Mit 📅 einem Tag zuordnen. Die Balken zeigen, wie voll ein Tag ist (Aufgaben ÷ freie Zeit nach Terminen).' })}
+    ${section('Noch nicht eingeplant', pool, { extra: `${pool.length}${sumEst(pool) ? ` · ${fmtMin(sumEst(pool))}` : ''}`, hint: 'Über das Kalender-Symbol einem Tag zuordnen. Die Balken zeigen, wie voll ein Tag ist (Aufgaben ÷ freie Zeit nach Terminen).' })}
     ${days.map(day => {
       const planned = db.tasks.filter(t => t.plan === day && t.status !== 'waiting').sort((a, b) => a.done - b.done || byPrio(a, b));
       const deadlines = open().filter(t => t.due === day && t.plan !== day).sort(byDue);
@@ -650,14 +655,14 @@ function viewWeek() {
       const isToday = day === t0;
       return `<section class="sec day${isToday ? ' is-today' : ''}${day < t0 ? ' past' : ''}">
         <div class="sec-h">
-          <h3>${WDL[d.getDay()]} <span class="muted">${short(day)}</span>${isToday ? ' <span class="badge b-today">Heute</span>' : ''}</h3>
+          <h3>${WDL[d.getDay()]} <span class="muted">${short(day)}</span></h3>
           ${blockedOn(day) ? '<span class="badge b-wait">blockiert</span>' : est || evs.length ? capBar(est, capOn(day)) : ''}
-          <button class="icon-btn small" data-a="openDay" data-v="${day}" aria-label="Zeitplan dieses Tages" title="Zeitplan">🕘</button>
-          <button class="icon-btn small" data-a="choose" data-v="${day}" aria-label="Neu für diesen Tag">+</button>
+          <button class="icon-btn small" data-a="openDay" data-v="${day}" aria-label="Zeitplan dieses Tages" title="Zeitplan">${ic('clock')}</button>
+          <button class="icon-btn small" data-a="choose" data-v="${day}" aria-label="Neu für diesen Tag">${ic('plus')}</button>
         </div>
         ${evs.map(evRow).join('')}
-        ${deadlines.map(t => `<button class="deadline plain" data-a="edit" data-id="${t.id}">⚑ Deadline: <b>${esc(t.title)}</b>${t.dueTime ? ` · ${t.dueTime}` : ''}${t.status === 'waiting' ? ` <span class="muted">(⏳ ${esc(t.waitingFor)})</span>` : t.plan ? ` <span class="muted">(geplant ${dayLabel(t.plan)})</span>` : ' <span class="bad">(nicht eingeplant)</span>'}</button>`).join('')}
-        ${planned.map(t => row(t, { hidePlan: true })).join('')}
+        ${deadlines.map(t => `<button class="deadline plain" data-a="edit" data-id="${t.id}">${ic('flag')}<span>Deadline: <b>${esc(t.title)}</b>${t.dueTime ? ` · ${t.dueTime}` : ''}${t.status === 'waiting' ? ` <span class="muted">(wartet auf ${esc(t.waitingFor)})</span>` : t.plan ? ` <span class="muted">(geplant ${dayLabel(t.plan)})</span>` : ' <span class="bad">(nicht eingeplant)</span>'}</span></button>`).join('')}
+        ${rows(planned, { hidePlan: true })}
         ${!planned.length && !deadlines.length && !evs.length ? '<div class="empty small">frei</div>' : ''}
       </section>`;
     }).join('')}`;
@@ -677,7 +682,7 @@ function viewMatrix(list) {
     <div class="matrix">${q.map(([title, sub, l, cls]) => `<section class="quad ${cls}">
       <div class="sec-h"><h3>${title}</h3><span class="muted small">${l.length}</span></div>
       <div class="muted small qsub">${sub}</div>
-      ${l.sort(byDue).map(t => row(t, { focus: true })).join('') || '<div class="empty small">leer</div>'}
+      ${rows(l.sort(byDue), { focus: true }) || '<div class="empty small">leer</div>'}
     </section>`).join('')}</div>`;
 }
 
@@ -701,8 +706,8 @@ function viewAll() {
       + section('Ohne Deadline', list.filter(t => !t.due));
   } else body = section(ui.filter === 'done' ? 'Erledigt' : 'Aufgaben', list);
   return `
-    <div class="chips seg">${chip('mode', 'list', '☰ Liste')}${chip('mode', 'matrix', '◫ Matrix')}</div>
-    <input class="search" type="search" data-f="ui.q" placeholder="Suchen…" value="${esc(ui.q)}">
+    <div class="chips seg">${chip('mode', 'list', ic('list') + 'Liste')}${chip('mode', 'matrix', ic('grid') + 'Matrix')}</div>
+    <div class="searchbox">${ic('search')}<input class="search" type="search" data-f="ui.q" placeholder="Suchen…" value="${esc(ui.q)}"></div>
     ${ui.mode === 'list' ? `<div class="chips">${chip('filter', 'open', 'Offen')}${chip('filter', 'done', 'Erledigt')}${chip('filter', 'all', 'Alle')}</div>` : ''}
     <div class="row gap">
       <select class="grow" data-f="ui.project">
@@ -725,8 +730,8 @@ function viewWaiting() {
   const groups = {};
   list.forEach(t => { (groups[t.waitingFor || 'Ohne Angabe'] ||= []).push(t); });
   return `<p class="muted small hint">Alles, was du abgegeben hast oder wofür du auf Daten, Feedback oder eine Freigabe wartest.
-    Mit ↩ holst du eine Aufgabe zurück, sobald die Antwort da ist.</p>
-    ${list.length ? Object.entries(groups).map(([who, l]) => section(`⏳ ${esc(who)}`, l, { unwait: true })).join('')
+    Mit dem Pfeil-Knopf holst du eine Aufgabe zurück, sobald die Antwort da ist.</p>
+    ${list.length ? Object.entries(groups).map(([who, l]) => section(`${ic('user')}${esc(who)}`, l, { unwait: true })).join('')
       : '<div class="empty">Du wartest gerade auf niemanden. Im Bearbeiten-Fenster einer Aufgabe kannst du „Warten auf …“ wählen.</div>'}`;
 }
 
@@ -745,7 +750,7 @@ function viewMore() {
         <span class="bar"><i style="width:${s.all.length ? Math.round((s.all.length - s.op.length) / s.all.length * 100) : 0}%"></i></span>
         <span class="muted small">${s.next ? `Nächste Deadline: ${esc(s.next.title)} – ${dayLabel(s.next.due)}` : 'Keine offene Deadline'}</span>
       </button>
-      ${p ? `<button class="icon-btn small" data-a="editProject" data-id="${p.id}" aria-label="Projekt bearbeiten">✎</button>` : ''}
+      ${p ? `<button class="icon-btn small" data-a="editProject" data-id="${p.id}" aria-label="Projekt bearbeiten">${ic('pencil')}</button>` : ''}
     </div>`;
   const none = stats('');
   const doneCount = db.tasks.filter(t => t.done).length;
@@ -753,25 +758,25 @@ function viewMore() {
   const sources = Object.entries(db.events.reduce((a, e) => { a[e.source] = (a[e.source] || 0) + 1; return a; }, {}));
   const setChip = (k, v, label) => `<button class="chip${+s[k] === v ? ' on' : ''}" data-a="setS" data-k="${k}" data-v="${v}">${label}</button>`;
   return `
-    <button class="banner" data-a="go" data-v="review">🗓 <span class="grow"><b>Wochenrückblick</b><br><small>${s.lastReview ? `Zuletzt: ${dayLabel(s.lastReview)}` : 'Noch nie gemacht'}</small></span> ›</button>
-    ${sync.configured ? `<button class="banner sync-banner" data-a="account">☁︎ <span class="grow"><b>Sync & Claude</b><br><small>${sync.email ? `${esc(sync.email)} · ${SYNC_LABEL[sync.state]}` : 'Handy, Laptop und Claude verbinden'}</small></span> ›</button>` : ''}
+    <button class="banner" data-a="go" data-v="review"><span class="bi">${ic('sparkle')}</span><span class="grow"><b>Wochenrückblick</b><small>${s.lastReview ? `Zuletzt: ${dayLabel(s.lastReview)}` : 'Noch nie gemacht'}</small></span>${ic('chevR', 'chev')}</button>
+    ${sync.configured ? `<button class="banner sync-banner" data-a="account"><span class="bi">${ic('cloud')}</span><span class="grow"><b>Sync & Claude</b><small>${sync.email ? `${esc(sync.email)} · ${SYNC_LABEL[sync.state]}` : 'Handy, Laptop und Claude verbinden'}</small></span>${ic('chevR', 'chev')}</button>` : ''}
 
     <section class="sec"><div class="sec-h"><h3>Vorlagen mit Rückwärtsplanung</h3></div>
       <p class="muted small hint">Für wiederkehrende Ergebnisse wie Bericht, Newsletter oder Präsentation: Deadline eingeben, und die Schritte werden rückwärts auf die Tage davor verteilt.</p>
       ${db.templates.map(tp => { const st = parseSteps(tp.text); const m = st.reduce((x, y) => x + y.est, 0); return `<div class="tcard row gap">
         <button class="plain grow col" data-a="applyTpl" data-id="${tp.id}"><b>${esc(tp.name)}</b><small class="muted">${st.length} Schritte${m ? ` · ${fmtMin(m)}` : ''}</small></button>
         <button class="primary small-btn" data-a="applyTpl" data-id="${tp.id}">Anwenden</button>
-        <button class="icon-btn small" data-a="editTpl" data-id="${tp.id}" aria-label="Vorlage bearbeiten">✎</button>
+        <button class="icon-btn small" data-a="editTpl" data-id="${tp.id}" aria-label="Vorlage bearbeiten">${ic('pencil')}</button>
       </div>`; }).join('')}
       <button class="ghost block" data-a="newTpl">+ Neue Vorlage</button>
     </section>
 
     <section class="sec"><div class="sec-h"><h3>Kalender</h3></div>
       <p class="muted small hint">Deine Termine bestimmen, wie viel Zeit pro Tag für Aufgaben bleibt. Ganztägige Termine wie „Urlaub“ oder „Krank“ blockieren den Tag.</p>
-      <button class="block" data-a="pasteSheet">📱 Termine aus iPhone-Kalender übernehmen</button>
-      <button class="block" data-a="importIcs">📥 Kalender-Datei (.ics) importieren – Outlook, Google, Mac</button>
-      <button class="block" data-a="exportIcs">📤 Planer → Kalender (.ics): Deadlines, Zeitblöcke, eigene Termine</button>
-      <button class="ghost block" data-a="newEvent">+ Eigener Termin</button>
+      <button class="block" data-a="pasteSheet">${ic('phone')}Termine aus iPhone-Kalender übernehmen</button>
+      <button class="block" data-a="importIcs">${ic('download')}Kalender-Datei (.ics) importieren – Outlook, Google, Mac</button>
+      <button class="block" data-a="exportIcs">${ic('upload')}Planer → Kalender (.ics): Deadlines, Zeitblöcke, eigene Termine</button>
+      <button class="ghost block" data-a="newEvent">${ic('plus')}Eigener Termin</button>
       ${sources.length ? `<div class="srclist">${sources.map(([src, n]) => `<div class="row gap"><span class="grow">${esc(srcLabel(src))} <span class="muted small">· ${n} Termine</span></span>${src ? `<button class="ghost small-btn danger" data-a="dropSource" data-v="${esc(src)}">Entfernen</button>` : ''}</div>`).join('')}</div>` : ''}
       <label class="lbl">Arbeitszeit (Rahmen für Zeitplan und freie Zeit)</label>
       <div class="row gap"><input type="time" data-f="s.workStart" value="${s.workStart}"><span class="muted">bis</span><input type="time" data-f="s.workEnd" value="${s.workEnd}"></div>
@@ -784,6 +789,8 @@ function viewMore() {
     </section>
 
     <section class="sec"><div class="sec-h"><h3>Einstellungen</h3></div>
+      <label class="lbl">Darstellung</label>
+      <div class="chips seg">${[['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button class="chip${(s.theme || 'auto') === v ? ' on' : ''}" data-a="setTheme" data-v="${v}">${l}</button>`).join('')}</div>
       <label class="lbl">Max. Aufgabenzeit pro Tag (gilt zusätzlich zur freien Zeit nach Terminen)</label>
       <div class="chips">${[180, 240, 300, 360, 420, 480].map(v => setChip('capacity', v, fmtMin(v))).join('')}</div>
       <label class="lbl">Dauer einer Fokus-Session</label>
@@ -795,8 +802,8 @@ function viewMore() {
     <section class="sec"><div class="sec-h"><h3>Daten</h3></div>
       <p class="muted small hint">Alles wird nur auf diesem Gerät gespeichert. Mach ab und zu ein Backup.</p>
       <div class="row gap">
-        <button class="grow" data-a="export">⬇︎ Backup</button>
-        <button class="grow" data-a="import">⬆︎ Laden</button>
+        <button class="grow" data-a="export">${ic('download')}Backup</button>
+        <button class="grow" data-a="import">${ic('upload')}Laden</button>
       </div>
       <button class="ghost block" data-a="clearDone"${doneCount ? '' : ' disabled'}>Erledigte löschen (${doneCount})</button>
     </section>
@@ -837,23 +844,23 @@ function viewReview() {
       <div><b>${spentWeek ? fmtMin(spentWeek) : '–'}</b><span>fokussiert erfasst</span></div>
       <div><b class="${ratio > 120 ? 'warn' : ''}">${ratio != null ? ratio + ' %' : '–'}</b><span>Ist ÷ Schätzung</span></div>
     </div>${ratio > 120 ? '<p class="small warn hint">Du brauchst im Schnitt länger als geschätzt. Plane künftig mehr Puffer ein.</p>' : ''}</div>`)}
-    ${step(2, 'Liegengebliebenes neu planen', overdue.length ? overdue.map(t => row(t)).join('') : '<div class="empty small">Nichts liegengeblieben 👍</div>')}
-    ${step(3, 'Warten auf: bei wem nachhaken?', wait.length ? wait.map(t => row(t, { unwait: true })).join('') : '<div class="empty small">Du wartest auf niemanden.</div>')}
-    ${step(4, 'Deadlines der nächsten 14 Tage einplanen', unplanned.length ? unplanned.map(t => row(t)).join('') : '<div class="empty small">Alle Deadlines sind eingeplant.</div>')}
+    ${step(2, 'Liegengebliebenes neu planen', overdue.length ? rows(overdue) : '<div class="empty small">Nichts liegengeblieben.</div>')}
+    ${step(3, 'Warten auf: bei wem nachhaken?', wait.length ? rows(wait, { unwait: true }) : '<div class="empty small">Du wartest auf niemanden.</div>')}
+    ${step(4, 'Deadlines der nächsten 14 Tage einplanen', unplanned.length ? rows(unplanned) : '<div class="empty small">Alle Deadlines sind eingeplant.</div>')}
     ${step(5, 'Nächste Woche: Auslastung', `<div class="loadlist">${nextDays.map(d => {
       const m = sumEst(active().filter(t => t.plan === d));
       const dl = open().filter(t => t.due === d).length;
-      return `<div class="row gap"><span class="lday">${WD[parse(d).getDay()]} ${short(d)}</span>${blockedOn(d) ? '<span class="grow muted small">blockiert</span>' : capBar(m, capOn(d))}${dl ? `<span class="badge b-soon">⚑ ${dl}</span>` : ''}</div>`;
+      return `<div class="row gap"><span class="lday">${WD[parse(d).getDay()]} ${short(d)}</span>${blockedOn(d) ? '<span class="grow muted small">blockiert</span>' : capBar(m, capOn(d))}${dl ? `<span class="badge b-soon">${ic('flag')}${dl}</span>` : ''}</div>`;
     }).join('')}</div>
-      <button class="ghost block" data-a="goWeek" data-v="${next}">In der Wochenansicht planen ›</button>`)}
-    ${noDue.length ? step(6, 'Ohne Termin: noch relevant?', `<p class="muted small hint">Streich, was nicht mehr wichtig ist. Gib dem Rest eine Deadline oder einen Plan-Tag.</p>${noDue.map(t => row(t)).join('')}`) : ''}
-    <button class="primary block big" data-a="reviewDone">✓ Rückblick abschließen</button>`;
+      <button class="ghost block" data-a="goWeek" data-v="${next}">In der Wochenansicht planen${ic('chevR')}</button>`)}
+    ${noDue.length ? step(6, 'Ohne Termin: noch relevant?', `<p class="muted small hint">Streich, was nicht mehr wichtig ist. Gib dem Rest eine Deadline oder einen Plan-Tag.</p>${rows(noDue)}`) : ''}
+    <button class="primary block big" data-a="reviewDone">${ic('check')}Rückblick abschließen</button>`;
 }
 
 // ---------- Sheets ----------
 const sheetWrap = (title, body, cls = '') => `<div class="sheet-backdrop" data-a="close"></div>
   <div class="sheet ${cls}" role="dialog" aria-label="${esc(title)}">
-    <div class="sheet-head row"><b class="grow">${esc(title)}</b><button class="icon-btn small" data-a="close" aria-label="Schließen">✕</button></div>
+    <div class="handle"></div><div class="sheet-head row"><b class="grow">${esc(title)}</b><button class="icon-btn small round" data-a="close" aria-label="Schließen">${ic('x')}</button></div>
     ${body}
   </div>`;
 
@@ -870,7 +877,7 @@ function sheetEdit(d) {
 
     <div class="chips seg">
       <button class="chip${waitingMode ? '' : ' on'}" data-a="setD" data-k="status" data-v="open">Ich mache es</button>
-      <button class="chip${waitingMode ? ' on' : ''}" data-a="setD" data-k="status" data-v="waiting">⏳ Warten auf …</button>
+      <button class="chip${waitingMode ? ' on' : ''}" data-a="setD" data-k="status" data-v="waiting">${ic('hourglass')}Warten auf …</button>
     </div>
     ${waitingMode ? `
       <input data-f="d.waitingFor" list="persons" placeholder="Auf wen oder was? (Name, Team, Daten …)" value="${esc(d.waitingFor)}" autocomplete="off">
@@ -911,14 +918,14 @@ function sheetEdit(d) {
 
     <label class="lbl">Teilschritte</label>
     ${d.subs.map(s => `<div class="sub row gap">
-      <button class="check small${s.done ? ' on' : ''}" data-a="subToggle" data-id="${s.id}" aria-label="Teilschritt erledigt">${s.done ? '✓' : ''}</button>
+      <button class="check small${s.done ? ' on' : ''}" data-a="subToggle" data-id="${s.id}" aria-label="Teilschritt erledigt">${ic('check')}</button>
       <input class="grow${s.done ? ' struck' : ''}" data-f="sub.${s.id}" value="${esc(s.t)}">
-      <button class="icon-btn small" data-a="subDel" data-id="${s.id}" aria-label="Entfernen">✕</button>
+      <button class="icon-btn small" data-a="subDel" data-id="${s.id}" aria-label="Entfernen">${ic('x')}</button>
     </div>`).join('')}
-    <div class="row gap"><input class="grow" data-f="uv.newSub" data-enter="subAdd" placeholder="Teilschritt hinzufügen…" value="${esc(ui.newSub || '')}" enterkeyhint="done" autocomplete="off"><button data-a="subAdd">+</button></div>
+    <div class="row gap"><input class="grow" data-f="uv.newSub" data-enter="subAdd" placeholder="Teilschritt hinzufügen…" value="${esc(ui.newSub || '')}" enterkeyhint="done" autocomplete="off"><button class="icon-btn" data-a="subAdd" aria-label="Teilschritt hinzufügen">${ic('plus')}</button></div>
 
     <button class="primary block big" data-a="saveTask">Speichern</button>
-    ${!waitingMode && !d.done ? `<button class="block" data-a="${running ? 'timerStop' : 'saveFocus'}">${running ? '■ Fokus-Timer stoppen' : `▶ Speichern & ${db.settings.focus} min fokussieren`}</button>` : ''}
+    ${!waitingMode && !d.done ? `<button class="block" data-a="${running ? 'timerStop' : 'saveFocus'}">${running ? ic('stop') + 'Fokus-Timer stoppen' : `${ic('play')}Speichern & ${db.settings.focus} min fokussieren`}</button>` : ''}
     ${isNew ? '' : `<div class="row gap">
       <button class="ghost grow" data-a="duplicate">Duplizieren</button>
       <button class="ghost grow danger" data-a="deleteTask">Löschen</button>
@@ -1035,7 +1042,7 @@ function sheetPaste(d) {
       <p class="muted small">Danach: Kurzbefehl ausführen (auch per Siri oder Widget), Planer öffnen → Mehr → hier → „Aus Zwischenablage einfügen“.<br>
       Hinweis: Die Namen der Aktionen können je nach iOS-Version leicht abweichen.</p>
     </details>
-    <button class="block" data-a="pasteClip">📋 Aus Zwischenablage einfügen</button>
+    <button class="block" data-a="pasteClip">${ic('clipboard')}Aus Zwischenablage einfügen</button>
     <textarea data-f="d.text" rows="5" class="mono" placeholder="…oder hier einfügen. Erwartet pro Zeile: Start | Ende | Titel | Kalender | Ganztägig. Ein .ics-Text geht auch.">${esc(d.text || '')}</textarea>
     <p class="muted small hint">${d.text ? `${n} Termine erkannt.` : ''} Bisher übernommene iPhone-Termine werden dabei ersetzt.</p>
     <button class="primary block big" data-a="doPaste"${n ? '' : ' disabled'}>${n ? `${n} Termine übernehmen` : 'Übernehmen'}</button>`);
@@ -1063,16 +1070,16 @@ function sheetAccount(d) {
   return sheetWrap('Sync & Claude', `
     <div class="srclist">
       <div class="row gap"><span class="grow">Konto</span><b>${esc(sync.email)}</b></div>
-      <div class="row gap"><span class="grow">Status</span><span class="sync-${sync.state}">● ${SYNC_LABEL[sync.state]}</span></div>
+      <div class="row gap"><span class="grow">Status</span><span class="sync-${sync.state}"><i class="sdot"></i>${SYNC_LABEL[sync.state]}</span></div>
       <div class="row gap"><span class="grow muted">Zuletzt abgeglichen</span><span class="muted">${sync.lastSync ? `${pad(sync.lastSync.getHours())}:${pad(sync.lastSync.getMinutes())}` : '–'}</span></div>
     </div>
     ${sync.error ? `<p class="small bad hint">${esc(sync.error)}</p>` : ''}
-    <button class="block" data-a="syncNow">↻ Jetzt abgleichen</button>
+    <button class="block" data-a="syncNow">${ic('refresh')}Jetzt abgleichen</button>
 
     <label class="lbl">Kalender-Abo (iPhone, Mac, Outlook)</label>
     <p class="small hint">Ein geheimer Link, den dein Kalender abonniert. Er zeigt Deadlines (⚑), Zeitblöcke (▶) und deine eigenen Termine und aktualisiert sich selbst. Kein Export nötig, keine Dubletten. Den Kalender-Namen „Planer“ bitte so lassen, dann werden diese Einträge beim Import nicht doppelt gezählt.</p>
     ${sync.feedUrl ? `
-      <a class="btn primary block" href="${esc(sync.feedUrl.replace(/^https:/, 'webcal:'))}">📆 Im Kalender abonnieren</a>
+      <a class="btn primary block" href="${esc(sync.feedUrl.replace(/^https:/, 'webcal:'))}">${ic('calendar')}Im Kalender abonnieren</a>
       <button class="block" data-a="copyFeed">Link kopieren</button>
       <button class="ghost block small-btn" data-a="renewFeed">Neuen Link erzeugen (alter wird ungültig)</button>`
       : '<button class="primary block" data-a="makeFeed">Abo-Link erstellen</button>'}
@@ -1086,7 +1093,7 @@ function sheetAccount(d) {
 
 function sheetConfirm(s) {
   return `<div class="sheet-backdrop" data-a="close"></div>
-  <div class="sheet confirm"><div class="sheet-head"><b>${esc(s.text)}</b></div>
+  <div class="sheet confirm"><div class="handle"></div><div class="sheet-head"><b>${esc(s.text)}</b></div>
     <div class="row gap"><button class="ghost grow" data-a="close">Abbrechen</button><button class="primary grow danger-bg" data-a="confirmYes">${esc(s.yes)}</button></div>
   </div>`;
 }
@@ -1110,15 +1117,19 @@ function render() {
   };
   const wasOpen = !!$app.querySelector('.sheet');
   const tab = ui.view === 'review' ? 'more' : ui.view;
+  const sub = { today: ui.todayMode === 'timeline' && ui.day !== today() ? '' : `${WDL[new Date().getDay()]}, ${short(today())}`, week: `KW ${isoWeek(ui.weekStart)}`,
+    waiting: `${waiting().length} offen`, all: `${open().length} offen`, more: '', review: 'Einmal pro Woche' }[ui.view] || '';
+  const title = ui.view === 'today' && ui.todayMode === 'timeline' && ui.day !== today() ? dayLabel(ui.day) : VIEWS[ui.view];
   $app.innerHTML = `
-    <header class="top"><div class="wrap row gap">
-      ${ui.view === 'review' ? '<button class="icon-btn" data-a="go" data-v="more" aria-label="Zurück">‹</button>' : ''}
-      <h1 class="grow">${ui.view === 'today' && ui.todayMode === 'timeline' && ui.day !== today() ? dayLabel(ui.day) : VIEWS[ui.view]}</h1>
-      ${sync.configured ? `<button class="icon-btn small sync-dot sync-${sync.state}" data-a="account" title="Sync: ${SYNC_LABEL[sync.state]}" aria-label="Sync: ${SYNC_LABEL[sync.state]}">${sync.state === 'off' ? '☁︎' : '●'}</button>` : ''}
-      ${ui.view === 'review' ? '' : '<button class="primary new-btn" data-a="new">+ Aufgabe</button>'}</div></header>
+    <header class="top"><div class="wrap topbar">
+      ${ui.view === 'review' ? `<button class="icon-btn round" data-a="go" data-v="more" aria-label="Zurück">${ic('chevL')}</button>` : ''}
+      <div class="titles grow">${sub ? `<div class="eyebrow">${sub}</div>` : ''}<h1>${title}</h1></div>
+      ${sync.configured ? `<button class="icon-btn round sync-dot sync-${sync.state}" data-a="account" title="Sync: ${SYNC_LABEL[sync.state]}" aria-label="Sync: ${SYNC_LABEL[sync.state]}">${ic('cloud')}<i class="sdot"></i></button>` : ''}
+    </div></header>
     <main class="wrap">${body}</main>
-    <nav class="tabs">${Object.entries(TABS).map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-a="go" data-v="${k}">
-      <span class="ti">${{ today: '☀︎', week: '▦', all: '☰', waiting: '⏳', more: '⋯' }[k]}</span>${l}${badge[k] ? `<i class="dot">${badge[k]}</i>` : ''}</button>`).join('')}</nav>
+    ${ui.view === 'review' ? '' : `<button class="fab" data-a="new" aria-label="Neue Aufgabe">${ic('plus')}</button>`}
+    <nav class="tabs"><div class="tabbar">${Object.entries(TABS).map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-a="go" data-v="${k}" aria-label="${l}">
+      ${ic({ today: 'sun', week: 'week', all: 'list', waiting: 'hourglass', more: 'more' }[k])}<span>${l}</span>${badge[k] ? `<i class="dot">${badge[k]}</i>` : ''}</button>`).join('')}</div></nav>
     ${sheet}`;
   document.body.classList.toggle('locked', !!s);
   if (wasOpen) $app.querySelector('.sheet')?.classList.add('still'); // nur beim Öffnen animieren
@@ -1180,7 +1191,7 @@ function complete(t) {
   if (timer && timer.id === t.id) stopTimer();
   t.done = !t.done;
   t.doneAt = t.done ? Date.now() : null;
-  let msg = t.done ? `„${t.title}“ erledigt ✓` : 'Wieder offen';
+  let msg = t.done ? `„${t.title}“ erledigt` : 'Wieder offen';
   if (t.done && t.repeat) {
     const n = nextOccurrence(t);
     db.tasks.push(n);
@@ -1249,7 +1260,7 @@ function icsItems() {
 }
 function exportIcs(mode) {
   const items = icsItems().filter(it => mode === 'all' || it.state !== 'same');
-  if (!items.length) { toast(mode === 'all' ? 'Nichts zum Exportieren' : 'Nichts Neues seit dem letzten Export 👍'); return; }
+  if (!items.length) { toast(mode === 'all' ? 'Nichts zum Exportieren' : 'Nichts Neues seit dem letzten Export'); return; }
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
   download(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Planer//DE\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Planer\r\n${items.map(it => it.text.replace('@@STAMP@@', stamp)).join('\r\n')}\r\nEND:VCALENDAR\r\n`, `planer-${today()}.ics`, 'text/calendar');
   db.settings.exported = { ...(db.settings.exported || {}) };
@@ -1361,6 +1372,7 @@ const actions = {
   toggleDone: () => { ui.showDone = !ui.showDone; },
   undo: () => { if (!undoSnap) return; db = JSON.parse(undoSnap); undoSnap = null; save(); $toast.hidden = true; },
   set: ({ k, v }) => { ui[k] = v; },
+  setTheme: ({ v }) => { db.settings.theme = v; save(); applyTheme(); },
   setS: ({ k, v }) => { db.settings[k] = k === 'skipWeekend' ? v === '1' : +v; save(); },
   setD: ({ k, v, num }) => {
     const d = ui.sheet.draft;
@@ -1409,7 +1421,7 @@ const actions = {
     t.plan = val || null; save(); ui.sheet = null;
     toast(val ? `Eingeplant: ${dayLabel(val)}` : 'Planung entfernt');
   },
-  reviewDone: () => { db.settings.lastReview = today(); save(); toast('Rückblick erledigt 🎉'); actions.go({ v: 'today' }); },
+  reviewDone: () => { db.settings.lastReview = today(); save(); toast('Rückblick erledigt'); actions.go({ v: 'today' }); },
   openProject: ({ id }) => { ui.project = id; ui.filter = 'open'; ui.mode = 'list'; actions.go({ v: 'all' }); },
   newProject: () => { ui.sheet = { type: 'project', draft: { id: uid(), name: '', color: COLORS[db.projects.length % COLORS.length] } }; },
   editProject: ({ id }) => { ui.sheet = { type: 'project', draft: { ...proj(id) } }; },
@@ -1481,7 +1493,9 @@ const actions = {
   import: () => document.getElementById('importFile').click(),
 };
 
+let swipeBlockClick = false;
 document.addEventListener('click', e => {
+  if (swipeBlockClick) { swipeBlockClick = false; e.preventDefault(); return; }
   const el = e.target.closest('[data-a]');
   if (!el || el.disabled) return;
   const fn = actions[el.dataset.a];
@@ -1565,9 +1579,64 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { ti
 render();
 tickTimer();
 
+// ---------- Wisch-Gesten: rechts = erledigt, links = auf morgen ----------
+let sw = null;
+const SW_LIMIT = 84;
+$app.addEventListener('pointerdown', e => {
+  const wrap = e.target.closest('.swipe');
+  if (!wrap || e.button > 0 || e.target.closest('.check, .icon-btn')) return;
+  sw = { wrap, task: wrap.querySelector('.task'), id: wrap.dataset.id, x: e.clientX, y: e.clientY, dx: 0, active: false, pid: e.pointerId };
+});
+$app.addEventListener('pointermove', e => {
+  if (!sw || e.pointerId !== sw.pid) return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+  if (!sw.active) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { sw = null; return; }
+    if (Math.abs(dx) < 12) return;
+    sw.active = true; sw.wrap.classList.add('swiping');
+    try { sw.wrap.setPointerCapture(e.pointerId); } catch {}
+  }
+  const t = task(sw.id);
+  sw.dx = dx < 0 && t && (t.done || t.status === 'waiting') ? 0 : Math.max(-140, Math.min(140, dx));
+  sw.task.style.transform = `translateX(${sw.dx}px)`;
+  sw.wrap.dataset.dir = sw.dx > 0 ? 'r' : 'l';
+  sw.wrap.classList.toggle('armed', Math.abs(sw.dx) > SW_LIMIT);
+});
+function endSwipe(e) {
+  if (!sw || (e && e.pointerId !== sw.pid)) return;
+  const { wrap, task: el, id, dx, active } = sw;
+  sw = null;
+  if (!active) return;
+  swipeBlockClick = true; setTimeout(() => { swipeBlockClick = false; }, 350);
+  wrap.classList.remove('swiping');
+  if (Math.abs(dx) > SW_LIMIT) {
+    navigator.vibrate?.(10);
+    el.style.transform = `translateX(${dx > 0 ? 110 : -110}%)`;
+    wrap.classList.add('gone');
+    setTimeout(() => {
+      const t = task(id); if (!t) return;
+      if (dx > 0) complete(t);
+      else { snap(); t.plan = addDays(today(), 1); t.planTime = ''; save(); toast(`„${t.title}“ auf morgen verschoben`, true); }
+      render();
+    }, 180);
+  } else { el.style.transform = ''; }
+}
+$app.addEventListener('pointerup', endSwipe);
+$app.addEventListener('pointercancel', endSwipe);
+
+// ---------- Darstellung ----------
+function applyTheme() {
+  const t = db.settings.theme || 'auto';
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0c0c10' : '#f4f4f7');
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+
 initSync({
   getDb: () => db,
-  replaceDb: next => { db = normalize(next) || db; save(); if (!ui.sheet || ['account', 'export'].includes(ui.sheet.type)) render(); else renderSoon(); },
+  replaceDb: next => { db = normalize(next) || db; save(); applyTheme(); if (!ui.sheet || ['account', 'export'].includes(ui.sheet.type)) render(); else renderSoon(); },
   onStatus: () => { if (!ui.sheet || ui.sheet.type === 'account') render(); else updateSyncDot(); },
 });
 // Während ein Fenster offen ist, die Seite dahinter nicht neu zeichnen (Eingaben bleiben erhalten).
@@ -1575,9 +1644,12 @@ let renderSoonTimer;
 function renderSoon() { clearTimeout(renderSoonTimer); renderSoonTimer = setTimeout(() => { if (!ui.sheet) render(); else renderSoon(); }, 1500); }
 function updateSyncDot() {
   const el = $app.querySelector('.sync-dot');
-  if (el) { el.className = `icon-btn small sync-dot sync-${sync.state}`; el.textContent = sync.state === 'off' ? '☁︎' : '●'; }
+  if (el) el.className = `icon-btn round sync-dot sync-${sync.state}`;
 }
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Neue Version installiert: einmal neu laden, damit sofort die aktuelle Fassung läuft.
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !ui.sheet) location.reload(); });
 }
