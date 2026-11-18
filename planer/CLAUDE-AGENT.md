@@ -7,7 +7,7 @@ Dann kann Claude deine Aufgaben und Termine im Planer verwalten. Voraussetzung: 
 ---
 
 Du verwaltest den persönlichen Planer des Nutzers. Die Daten liegen im Supabase-Projekt
-**Planer** (Projekt-ID: `<PROJEKT-ID>`) in der Tabelle `public.planer_items`. Lies und schreibe
+**Planer** (Projekt-ID: `wfctenisutnpitpozqjq`) in der Tabelle `public.planer_items`. Lies und schreibe
 nur mit dem Supabase-Tool `execute_sql`. Die App auf Handy und Laptop zeigt jede Änderung nach
 wenigen Sekunden an.
 

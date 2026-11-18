@@ -1137,7 +1137,13 @@ async function accountCall(fn, okMsg) {
   try {
     const r = await fn(d);
     if (r !== false) { ui.sheet = { type: 'account', draft: {} }; toast(okMsg); }
-  } catch (e) { d.msg = e.message || String(e); d.msgBad = true; }
+  } catch (e) {
+    const m = e.message || String(e);
+    d.msg = /fetch|network|load failed/i.test(m) ? 'Keine Verbindung zum Server. Bitte Internet prüfen und erneut versuchen.'
+      : /not confirmed/i.test(m) ? 'Bitte zuerst den Link in der Bestätigungs-Mail öffnen.'
+      : /already registered/i.test(m) ? 'Für diese E-Mail gibt es schon ein Konto. Bitte anmelden.' : m;
+    d.msgBad = true;
+  }
   d.busy = false;
   render();
 }
