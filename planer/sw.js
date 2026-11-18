@@ -1,9 +1,9 @@
 // Service Worker des Planers: cacht alle Dateien, danach läuft der Planer ohne Internet.
 // Bei Änderungen VERSION erhöhen, damit Geräte die neue Fassung laden.
-const VERSION = 'planer-v6';
+const VERSION = 'planer-v7';
 const ASSETS = [
-  './', 'index.html', 'manifest.webmanifest', 'style.css', 'app.js', 'sync.js', 'config.js', 'vendor/supabase.js',
-  '../icon-180.png', '../icon-192.png', '../icon-512.png',
+  './', 'index.html', 'manifest.webmanifest', 'style.css', 'app.js', 'icons.js', 'sync.js', 'config.js', 'vendor/supabase.js',
+  'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'favicon.svg',
 ];
 
 self.addEventListener('install', e => {
